@@ -126,7 +126,7 @@ class LineBuilder:
         line_nonglint = int(self.img_line_nonglint.split('line_')[1][:2]) #get the current image line
         bboxes = {'glint':{'line':line_glint,'fp':self.img_line_glint,'bbox':self.img_bbox_glint},\
             'non_glint':{'line':line_nonglint,'fp':self.img_line_nonglint,'bbox':self.img_bbox_nonglint}}
-        with open(join(self.fp_save,'sunglint_correction_{}.txt'.format(self.prefix)),'w') as cf:
+        with open(join(self.fp_save,'glint_{}.txt'.format(self.prefix)),'w') as cf:
             json.dump(bboxes,cf)
 
     def next(self, _event):

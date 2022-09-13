@@ -1,0 +1,1 @@
+{"glint": {"line": 5, "fp": "D:\\PAKHUIYING\\Image_processing\\F3_raw_images\\glint\\2021_12_09_10-37-49_rgb_image_line_05_10140_11341.tif", "bbox": [[2027, 905], [2169, 746]]}, "non_glint": {"line": 5, "fp": "D:\\PAKHUIYING\\Image_processing\\F3_raw_images\\glint\\2021_12_09_10-37-49_rgb_image_line_05_10140_11341.tif", "bbox": [[1132, 638], [1274, 503]]}}
