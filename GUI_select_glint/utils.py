@@ -13,6 +13,13 @@ import cv2 as cv
 from os.path import join, basename
 from os import listdir
 import json
+from skimage.color import rgb2gray
+
+import sys
+sys.path.insert(0,r'D:\PAKHUIYING\Image_processing\F3_raw_images\utils')
+import importlib
+import utils
+importlib.reload(utils)
 
 def view_selection(fp,plot=True):
     """ 
@@ -119,3 +126,51 @@ def glint_ratio(spectra_dict_list):
     glint_ratio = np.mean(glint_ratio,axis=0)
 
     return glint_ratio
+
+def add_glint(non_glint,non_glint_mask,thresh,glint_ratio,plot=True):
+    
+    #mask object
+    mask = np.repeat(non_glint_mask[:,:,np.newaxis],3,axis=2)
+    masked_non_glint = mask*non_glint
+    # utils.plot_an_image(masked_non_glint)
+    
+    # greyscale then normalise
+    std_grey_im = utils.normalise_img(rgb2gray(masked_non_glint)) #already masked, greyscaled, then normalised
+    
+    #identify bright regions based on threshold
+    glint_mask = std_grey_im > thresh #identify brightspots with DN > 0.8. brightspots will have DN = 1
+    # utils.plot_an_image(glint_mask)
+
+    # on glint mask, increase glint ratio 
+    simulated_glint = non_glint.copy()#.astype(np.uint16)
+    sim_glint = non_glint[glint_mask == 1]*(glint_ratio)
+    sim_glint = np.where(sim_glint>255,255,sim_glint)
+    simulated_glint[glint_mask == 1] = sim_glint
+    # utils.plot_an_image(simulated_glint)
+    
+    #increase brightness for glint mask (unnatural)
+    # simulated_glint = non_glint.copy()#.astype(np.uint16)
+    # brightened_region = increase_brightness(non_glint[glint_mask == 1],alpha=0.5,beta=10)
+    # simulated_glint[glint_mask == 1] = brightened_region
+    # utils.plot_an_image(simulated_glint)
+
+    # bin_upward,bin_downward = boundary_binary(glint_mask)
+    # utils.plot_an_image(bin_upward)
+    # utils.plot_an_image(bin_downward)
+
+    # sim_glint = add_rainbow(simulated_glint,bin_upward,bin_downward,alpha)
+    # utils.plot_an_image(sim_glint)
+    # apply gaussian smoothing
+    # colors_gauss = scipy.ndimage.gaussian_filter(sim_glint,sigma=(1,1,0))
+    # utils.plot_an_image(colors_gauss)
+    if plot is True:
+        fig, ax = plt.subplots(1,2,figsize=(8,4))
+        ax[0].imshow(non_glint)
+        ax[0].set_title('Original image')
+        ax[1].imshow(simulated_glint)
+        ax[1].set_title('simulated glint')
+        ax[0].axis('off')
+        ax[1].axis('off')
+        
+    return simulated_glint
+
