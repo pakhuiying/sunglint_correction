@@ -154,12 +154,15 @@ def interpolate_colors(color,spectra,steps,plot=True):
 
     return color_sq.astype(np.uint8)
 
-def water_palette(non_glint,color_step=100,spectra_step=25,plot=True):
+def water_palette(non_glint,color_step=100,spectra_step=25,cut_off=0.15,extend_extreme=3,plot=True):
     """ 
     non_glint (np.array): image with no glint
     color_step (int): how many colors to sample from cm's Spectral palette
     spectra_step (int): sq number. Number of interpolation steps between spectra to color
+    cut_off (float): [0,1]: How much of the red and blue to remove from cm.Spectral
+    extend_extreme (int): how much of the red and blue to interpolate to the target spectrum as a multiple of spectra_step
     returns glint palette
+    >>> water_palette(non_glint,color_step=100,spectra_step=25,cut_off=0.15,extend_extreme=3,plot=False)
     """
     spectra = np.mean(non_glint,axis=(0,1))
     x = np.linspace(0,1,color_step)
@@ -167,7 +170,7 @@ def water_palette(non_glint,color_step=100,spectra_step=25,plot=True):
     c = np.swapaxes(c[:,:,np.newaxis],1,2)*255
     c = c.astype(np.uint8)
     row,col = c.shape[0], c.shape[1]
-    c = c[int(0.10*row):int(0.90*row),:,:]
+    c = c[int(cut_off*row):int((1-cut_off+0.05)*row),:,:]
     # utils.plot_an_image(c)
     interp_colors = np.zeros((c.shape[0],spectra_step,3))
     for row in range(c.shape[0]):
@@ -178,9 +181,9 @@ def water_palette(non_glint,color_step=100,spectra_step=25,plot=True):
     c_list = []
     c1_list = []
     for i in range(spectra_step):
-        c = interpolate_colors(interp_colors[0,i,:],spectra,spectra_step*2,plot=False)
+        c = interpolate_colors(interp_colors[0,i,:],spectra,spectra_step*extend_extreme,plot=False)
         c_list.append(c)
-        c1 = interpolate_colors(spectra,interp_colors[-1,i,:],spectra_step*2,plot=False)
+        c1 = interpolate_colors(spectra,interp_colors[-1,i,:],spectra_step*extend_extreme,plot=False)
         c1_list.append(c1)
 
     interp_top = np.column_stack(c_list)
@@ -203,6 +206,7 @@ def glint_sampling(glint_palette,brightness,saturation,contrast,h,w=7,sample_n=1
     w (int): width of glint pixels generated
     sample_n (int): how many colors to sample
     sigma (int): how much gaussian smoothing to apply
+    >>> glint_sampling(glint_palette,brightness=0,saturation=0.4,contrast=1,h=0,w=7,sample_n=12,sigma=1,plot=False)
     """
     brightened_palette = cv.convertScaleAbs(glint_palette,alpha = contrast, beta=brightness)#alpha is the gain, beta is the bias to control contrast and brightness respectively
     nrow,ncol = glint_palette.shape[0], glint_palette.shape[1]
@@ -216,16 +220,19 @@ def glint_sampling(glint_palette,brightness,saturation,contrast,h,w=7,sample_n=1
     glint_pixel = np.row_stack((sampled_pixels[:r//2,:,:],white_pixels,sampled_pixels[-r//2:,:,:]))
     glint_pixel = np.tile(glint_pixel,(1,w,1))
     # apply gaussian smoothing
-    colors_gauss = scipy.ndimage.gaussian_filter(glint_pixel,sigma=(sigma,sigma,0))
+    if sigma > 0:
+        glint_pixel = scipy.ndimage.gaussian_filter(glint_pixel,sigma=(sigma,sigma,0))
     # utils.plot_an_image(sampled_pixels)
     # utils.plot_an_image(glint_pixel)
     if plot is True:
-        utils.plot_an_image(colors_gauss)
+        utils.plot_an_image(glint_pixel)
 
-    return colors_gauss
+    return glint_pixel
 
 def add_glint(non_glint,non_glint_mask,thresh,glint_ratio,plot=True):
-    
+    """
+    *outdated*
+    """
     #mask object
     mask = np.repeat(non_glint_mask[:,:,np.newaxis],3,axis=2)
     masked_non_glint = mask*non_glint
@@ -274,3 +281,81 @@ def add_glint(non_glint,non_glint_mask,thresh,glint_ratio,plot=True):
         
         
     return non_glint, glint_mask.astype(np.uint8), simulated_glint.astype(np.uint8)
+
+def sin_curve(amplitude,period,x_translate,y_translate,n=50,plot=True):
+    x = np.linspace(-2*np.pi,2*np.pi,n)
+    fx = amplitude*np.sin(x*2*np.pi/period+x_translate) + amplitude
+    if plot is True:
+        plt.figure()
+        plt.plot(x,fx)
+        plt.title(f'Amplitude: {amplitude}, period: {period}, x_translate: {x_translate}, y_translate: {y_translate}')
+        plt.show()
+    return fx.astype(int)
+
+def randomize_tiles_shuffle_blocks(a, M, N):
+    """ 
+    A function to shuffle randomly 3D blocks wrt each other, while conserving the pattern within the block across all axes
+    Ensure that shape of a is multiples of M & n
+    a (np.array): 3 channels
+    M , N (int): dimensions of the block
+    """    
+    m,n,c = a.shape
+    b = a.reshape(m//M,M,n//N,N,c).swapaxes(1,2).reshape(-1,M*N,c)
+    np.random.shuffle(b)
+    return b.reshape(m//M,n//N,M,N,c).swapaxes(1,2).reshape(a.shape)
+
+def roll_column(a,shift_array,width):
+    """ 
+    this function shifts the columns
+    shift_array (1D np.array): any shape. As it will be broadcasted to account for the width and shape of 'a'
+    width (int): shift blocks of column size width
+    >>> roll_column(a,np.arange(-2,2),width=2)
+    """
+    # shift_array can be any size, because it is repeated by the width and then cropped to fit the size of column
+    shift_array = np.repeat(shift_array,width)[:a.shape[1]]
+    # get the row and column indices
+    row_indices,column_indices = np.ogrid[:a.shape[0],:a.shape[1]]
+    shift_array[shift_array<0] += a.shape[0] #because we are shifting the rows of the pixels around
+    row_indices = row_indices - shift_array[:,np.newaxis].T
+    result = a[row_indices,column_indices,:]
+    return result
+
+def apply_glint_mask(non_glint,glint_mask_list,brightness=1,saturation=0.25,contrast=1,h=0,w=7,sample_n=12,sigma=1,plot=True):
+    """
+    glint_mask_list (list of np.arrays): list of masks, in increasing order of threshold that is used to create the mask
+    """
+    if plot is True:
+        fig, axes = plt.subplots(2,len(glint_mask_list)+1,figsize=(10,5))
+
+    glint_palette = water_palette(non_glint,color_step=125,spectra_step=25,plot=False)
+    c_list = []
+    for i in range(len(glint_mask_list)):
+        c = glint_sampling(glint_palette,brightness-i*50,saturation+(i*0.25),contrast+(i*1),h,w,sample_n+i*sample_n,sigma,plot=False)
+        c = c[::1+i]
+        # print(c.shape)
+        c_list.append(c)
+        if plot is True:
+            axes[0,i].imshow(c_list[i])
+
+    nrow,ncol = glint_mask_list[0].shape
+    c0_row,c0_col = c_list[-1].shape[0],c_list[-1].shape[1]
+    mrow,mcol = ceil(nrow/c0_row), ceil(ncol/c0_col)
+    
+    shuffle_column = np.array([randrange(-sample_n,sample_n) for i in range(ceil(ncol/w))])
+    simulated_glint = non_glint.copy()
+    for i,(c,mask) in enumerate(zip(c_list,glint_mask_list)):
+        c_tile = np.tile(c,(mrow,mcol,1))
+        # shuffle the columns randomly
+        c_tile = roll_column(c_tile,shuffle_column,width=w)
+        c_tile = c_tile[:nrow,:ncol,:] *np.repeat(mask[:,:,np.newaxis],3,axis=2)
+        simulated_glint[mask==1] = c_tile[mask==1]
+        if plot is True:
+            axes[1,i].imshow(simulated_glint)
+            # utils.plot_an_image(simulated_glint)
+    if plot is True:
+        axes[1,-1].imshow(non_glint)
+        axes[1,-1].set_title('Non_glint')
+        fig.delaxes(axes[0][-1])
+        plt.show()
+
+    return simulated_glint
