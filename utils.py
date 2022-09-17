@@ -68,7 +68,7 @@ def save_imgs(cut_img_list,directory):
     
     return
 
-def preview_cut_img(cut_img_list):
+def preview_cut_img(cut_img_list,gui_plot=False):
     ncol = 4
     nrow = int(ceil(len(cut_img_list)/ncol))
     fig,axes = plt.subplots(nrow,ncol,figsize=(15,15))
@@ -77,7 +77,8 @@ def preview_cut_img(cut_img_list):
             ax.imshow(img)
         else:
             ax.imshow(img,cmap='grey',vmin=0,vmax=255)
-    
+    if gui_plot is True:
+        plt.show(block=False)
     return
 
 def stitch_cut_images(cut_img_list,w,h=1024):
