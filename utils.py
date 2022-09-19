@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import random
 import shutil
 import cv2 as cv
-from os.path import join, basename
+from os.path import join, basename, splitext, exists
 from os import listdir
 
 def pad_images(img):
@@ -115,7 +115,26 @@ def normalise_img(img):
     im_max = np.max(img)
     return (img - im_min)/(im_max-im_min)
 
-def save_img(img,dir,name,prefix='',postfix='',ext=".png"):
+def uniquify(path):
+    """
+    detects whether a path exists, and if True, append a counter or increment the counter to the path
+    """
+    filename, extension = splitext(path)
+    counter = 1
+
+    while exists(path):
+        if len(path.rsplit('_',1)[-1].replace(extension,'')) == 2: #identify whether the postfix is a img cut number
+            path = filename + "_{}".format(str(counter).zfill(4)) + extension
+            # break
+        else:
+            filename = path.rsplit('_',1)[0]
+            # print(filename)
+            path = filename + "_{}".format(str(counter).zfill(4)) + extension
+        counter += 1
+
+    return path
+
+def save_img(img,dir,name,prefix='',postfix='',ext=".png",overwrite=False):
     """
     img (np.array)
     dir (str): directory to store the images
@@ -126,7 +145,12 @@ def save_img(img,dir,name,prefix='',postfix='',ext=".png"):
     fn = '{}_{}_{}_{}'.format(prefix,name,postfix,ext)
     if prefix == '':
         fn = fn[1:] #remove the first underscore
-    img.save(join(dir,fn))
+    if overwrite is True:
+        img.save(join(dir,fn))
+    else:
+        fp = uniquify(join(dir,fn))
+        img.save(fp)
+    return
 
 def mask_objects(model,img):
     """

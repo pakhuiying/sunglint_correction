@@ -7,7 +7,7 @@ import scipy.signal
 import numpy as np
 import PIL.Image
 import matplotlib.pyplot as plt
-from os.path import join, basename, isdir, isfile
+from os.path import join, basename, isdir, isfile, exists
 from os import listdir, mkdir
 from skimage.color import rgb2gray
 from random import randrange,sample
@@ -335,12 +335,7 @@ while True:
                     simulated_glint = gp.apply_glint_mask(non_glint,mask_list,params_dict,palette_dict,plot=True,plot_gui=True)
                     # preview simulated glint
                     window['-PREVIEW_IMAGE-'].update(data=gu.array_to_bytes(simulated_glint, resize=(300,300),binary=False))
-                    # save parameters for repeatability
-                    if values['-STORE_DIR_PATH-'] != '':
-                        with open(join(values['-STORE_DIR_PATH-'],'params_{}_{:02}.json'.format(basename_img,cut_img_counter%len(cut_img))),'w') as cf:
-                            params_json = {k:v.tolist() for k,v in params_dict.items()}
-                            params_json['-THRESHOLD-'] = mask_threshold.tolist()
-                            json.dump(params_json,cf)
+                    
                     
                     window['Save'].update(disabled=False)
                     window['-PROCESS_ALL-'].update(disabled=False)
@@ -348,17 +343,48 @@ while True:
                     pass
     
     if event == 'Save': #only save one cut_image
-        if values['-STORE_DIR_PATH-'] != '':
+        if values['-STORE_DIR_PATH-'] == '':
             fp_store = sg.popup_get_folder("Specify directory to store image")
         else:
-            # make directory of:
-            # original image without glint
-            # glint mask
-            # simulated glint
             fp_store = values['-STORE_DIR_PATH-']
-            postfix = str(cut_img_counter%len(cut_img)).zfill(2)
-            utils.save_img(simulated_glint,fp_store,basename_img,prefix='',postfix=postfix,ext=".png",overwrite=False) #do not overwrite file because of different params settings on the same img
 
+        # make directory of:
+        # original image without glint
+        dir_non_glint = 'non_glint_cut'
+        # glint mask
+        dir_glint_mask = 'glint_mask_cut'
+        # simulated glint
+        dir_sim_glint = 'sim_glint_cut'
+        # params
+        dir_params = 'params'
+
+        fp_store = values['-STORE_DIR_PATH-']
+        if exists(join(fp_store,dir_non_glint)) is False:
+            mkdir(join(fp_store,dir_non_glint))
+        if exists(join(fp_store,dir_glint_mask)) is False:
+            mkdir(join(fp_store,dir_glint_mask))
+        if exists(join(fp_store,dir_sim_glint)) is False:
+            mkdir(join(fp_store,dir_sim_glint))
+        if exists(join(fp_store,dir_params)) is False:
+            mkdir(join(fp_store,dir_params))
+        
+        save_dict = {dir_non_glint: non_glint,
+                    dir_glint_mask: mask_list[list(mask_list)[0]], 
+                    dir_sim_glint:simulated_glint} #take the first mask from the list
+        postfix = str(cut_img_counter%len(cut_img)).zfill(2) #append number of the cut_img
+        # remember to process first before saving
+
+        # save parameters for repeatability
+        param_fp = utils.uniquify(join(fp_store,dir_params,'{}_{:02}.json'.format(basename_img,cut_img_counter%len(cut_img))))
+        with open(param_fp,'w') as cf:
+            params_json = {k:v.tolist() for k,v in params_dict.items()}
+            params_json['-THRESHOLD-'] = mask_threshold.tolist()
+            json.dump(params_json,cf)
+        # save images in their respective folders
+        for dir, im in save_dict.items():
+            utils.save_img(im,join(fp_store,dir),basename_img,prefix='',postfix=postfix,ext=".png",overwrite=False) #do not overwrite file because of different params settings on the same img
+
+        sg.popup(f'Files saved successfully in {fp_store}!')
 
         
 
