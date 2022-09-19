@@ -320,38 +320,39 @@ def roll_column(a,shift_array,width):
     result = a[row_indices,column_indices,:]
     return result
 
-def apply_glint_mask(non_glint,glint_mask_list,params_dict,palette_dict = None,plot=True):
+def apply_glint_mask(non_glint,glint_mask_list,params_dict,palette_dict = None,plot=True,plot_gui=False):
     """
-    glint_mask_list (list of np.arrays): list of masks, in increasing order of threshold that is used to create the mask
+    non_glint (np.array)
+    glint_mask_list (dictionary. keys: threshold, value:np.array of mask):in increasing order of threshold that is used to create the mask
     """
 
     #initialise plot
     if plot is True:
-        fig, axes = plt.subplots(2,len(glint_mask_list)+1,figsize=(10,5))
+        fig, axes = plt.subplots(2,len(glint_mask_list.keys())+1,figsize=(10,5))
 
     # initialise glint palette    
     if palette_dict is None:
         glint_palette = water_palette(non_glint,color_step=125,spectra_step=25,plot=False)
     else:
-        glint_palette = water_palette(non_glint,palette_dict['color_step'],
-                                                            palette_dict['spectra_step'],
-                                                            palette_dict['cut_off'],
-                                                            palette_dict['extend_extreme'],
+        glint_palette = water_palette(non_glint,palette_dict['-COLOR_STEP-'],
+                                                            palette_dict['-SPECTRA_STEP-'],
+                                                            palette_dict['-CUT_OFF-'],
+                                                            palette_dict['-EXTEND_EXTREME-'],
                                                             plot=False)
 
     c_list = []
 
     # include assert to check if params_dict's element's list is == len(glint_mask_list)
     c0_row,c0_col = 512,512
-    for i in range(len(glint_mask_list)):
+    for i in range(len(glint_mask_list.keys())):
         c = glint_sampling(glint_palette,
-                                        params_dict['brightness'][i],
-                                        params_dict['saturation'][i],
-                                        params_dict['contrast'][i],
-                                        params_dict['h'][i],
-                                        params_dict['w'][i],
-                                        params_dict['sample_n'][i],
-                                        params_dict['sigma'][i],
+                                        params_dict['-BRIGHTNESS-'][i],
+                                        params_dict['-SATURATION-'][i],
+                                        params_dict['-CONTRAST-'][i],
+                                        params_dict['-H-'][i],
+                                        params_dict['-W-'][i],
+                                        params_dict['-SAMPLE_N-'][i],
+                                        params_dict['-SIGMA-'][i],
                                         plot=False)
         c = c[::1+i]
         if c.shape[0] < c0_row:
@@ -362,11 +363,11 @@ def apply_glint_mask(non_glint,glint_mask_list,params_dict,palette_dict = None,p
         if plot is True:
             axes[0,i].imshow(c_list[i])
             axes[0,i].axis('off')
-            axes[0,i].set_title('B:{}, S: {:.3f}, C: {}'.format(params_dict['brightness'][i],
-                                                    params_dict['saturation'][i],
-                                                    params_dict['contrast'][i]))
+            axes[0,i].set_title('B:{}, S: {:.3f}, C: {}'.format(params_dict['-BRIGHTNESS-'][i],
+                                                    params_dict['-SATURATION-'][i],
+                                                    params_dict['-CONTRAST-'][i]))
 
-    nrow,ncol = glint_mask_list[0].shape
+    nrow,ncol = glint_mask_list[list(glint_mask_list)[0]].shape
     print(nrow,ncol)
     # c0_row,c0_col = c_list[-1].shape[0],c_list[-1].shape[1]
     mrow,mcol = ceil(nrow/c0_row), ceil(ncol/c0_col)
@@ -374,8 +375,8 @@ def apply_glint_mask(non_glint,glint_mask_list,params_dict,palette_dict = None,p
     
     
     simulated_glint = non_glint.copy()
-    for i,(c,mask) in enumerate(zip(c_list,glint_mask_list)):
-        shuffle_column = np.array([randrange(-c0_row,c0_row) for i in range(ceil(ncol/params_dict['w'][0]))])
+    for i,(c,(t,mask)) in enumerate(zip(c_list,glint_mask_list.items())):
+        shuffle_column = np.array([randrange(-c0_row,c0_row) for i in range(ceil(ncol/params_dict['-W-'][0]))])
         c_tile = np.tile(c,(mrow,mcol,1))
         # shuffle the columns randomly
         c_tile = roll_column(c_tile,shuffle_column,width=c0_col)
@@ -383,18 +384,22 @@ def apply_glint_mask(non_glint,glint_mask_list,params_dict,palette_dict = None,p
         simulated_glint[mask==1] = c_tile[mask==1]
         if plot is True:
             axes[1,i].imshow(simulated_glint)
+            axes[1,i].set_title(f'Thresh: {t}')
             axes[1,i].axis('off')
             # utils.plot_an_image(simulated_glint)
     if plot is True:
         axes[1,-1].imshow(non_glint)
         axes[1,-1].axis('off')
-        axes[1,-1].set_title('Non_glint')
+        axes[1,-1].set_title('Original image')
         fig.delaxes(axes[0][-1])
-        plt.show()
+        if plot_gui is True:
+            plt.show(block=False)
+        else:
+            plt.show()
 
     return simulated_glint
 
-def create_masks(non_glint,non_glint_mask,thresh_array,plot=True):
+def create_masks(non_glint,non_glint_mask,thresh_array,plot=True,plot_gui=False):
     """ 
     non_glint (3D np.array): non glint image
     non_glint_mask (2D np.array): a mask that masks non-water objects
@@ -410,10 +415,11 @@ def create_masks(non_glint,non_glint_mask,thresh_array,plot=True):
     if plot is True:
         fig,axes = plt.subplots(1,thresh_array.shape[0]+1,figsize=(8,4))
     #identify bright regions based on various thresholds
-    mask_list = []
+    mask_list = {}
     for i,t in enumerate(thresh_array):
         glint_mask = std_grey_im > t
-        mask_list.append(glint_mask)
+        # mask_list.append(glint_mask)
+        mask_list['{:.2f}'.format(t)] = glint_mask
         if plot is True:
             axes[i].imshow(glint_mask,cmap='gray')
             axes[i].set_title('thresh = {:.2f}'.format(t))
@@ -422,5 +428,7 @@ def create_masks(non_glint,non_glint_mask,thresh_array,plot=True):
     if plot is True:
         axes[-1].imshow(non_glint)
         axes[-1].axis('off')
+        if plot_gui is True:
+            plt.show(block=False)
 
     return non_glint,mask_list

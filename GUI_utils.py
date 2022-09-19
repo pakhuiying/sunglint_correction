@@ -49,7 +49,7 @@ def array_to_bytes(file_or_img,resize=None,binary=True):
 
     if binary is True:
         img_rgb = img_rgb*255
-        
+
     img = PIL.Image.fromarray(img_rgb,'RGB')
     cur_width, cur_height = img.size
     if resize:
@@ -60,3 +60,5 @@ def array_to_bytes(file_or_img,resize=None,binary=True):
     img.save(bio, format="PNG")
     del img
     return bio.getvalue()
+
+

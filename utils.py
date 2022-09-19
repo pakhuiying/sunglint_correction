@@ -115,9 +115,18 @@ def normalise_img(img):
     im_max = np.max(img)
     return (img - im_min)/(im_max-im_min)
 
-def save_img(img,dir,name,ext=".png"):
+def save_img(img,dir,name,prefix='',postfix='',ext=".png"):
+    """
+    img (np.array)
+    dir (str): directory to store the images
+    name (str): name of image
+    ext (str): default is png
+    """
     img = PIL.Image.fromarray(img)
-    img.save(join(dir,'{}{}'.format(name,ext)))
+    fn = '{}_{}_{}_{}'.format(prefix,name,postfix,ext)
+    if prefix == '':
+        fn = fn[1:] #remove the first underscore
+    img.save(join(dir,fn))
 
 def mask_objects(model,img):
     """
