@@ -72,11 +72,13 @@ def preview_cut_img(cut_img_list,gui_plot=False):
     ncol = 4
     nrow = int(ceil(len(cut_img_list)/ncol))
     fig,axes = plt.subplots(nrow,ncol,figsize=(15,15))
-    for img, ax in zip(cut_img_list,axes.flatten()):
+    for i,(img, ax) in enumerate(zip(cut_img_list,axes.flatten())):
         if img.ndim == 3:
             ax.imshow(img)
         else:
-            ax.imshow(img,cmap='grey',vmin=0,vmax=255)
+            ax.imshow(img,cmap='gray')
+        ax.set_title(f'Image no. {i}')
+        ax.axis('off')
     if gui_plot is True:
         plt.show(block=False)
     return
@@ -142,7 +144,7 @@ def save_img(img,dir,name,prefix='',postfix='',ext=".png",overwrite=False):
     ext (str): default is png
     """
     img = PIL.Image.fromarray(img)
-    fn = '{}_{}_{}_{}'.format(prefix,name,postfix,ext)
+    fn = '{}_{}_{}{}'.format(prefix,name,postfix,ext)
     if prefix == '':
         fn = fn[1:] #remove the first underscore
     if overwrite is True:
@@ -151,6 +153,20 @@ def save_img(img,dir,name,prefix='',postfix='',ext=".png",overwrite=False):
         fp = uniquify(join(dir,fn))
         img.save(fp)
     return
+
+def read_txt_into_list(fp):
+    # opening the file in read mode
+    my_file = open(fp, "r")
+
+    # reading the file
+    data = my_file.read()
+    
+    # replacing end splitting the text 
+    # when newline ('\n') is seen.
+    data_into_list = data.split("\n")
+    data_into_list = [d for d in data_into_list if d !='']
+    my_file.close()
+    return data_into_list
 
 def mask_objects(model,img):
     """

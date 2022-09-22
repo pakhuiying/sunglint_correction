@@ -71,14 +71,15 @@ def get_main_window():
                 [sg.Text('Width:',size=(12,1)), sg.Input(default_text='7,7',size=(15,1),key='-W-',tooltip='[int]: Width of the glint pixel')],
                 [sg.Text('Sample colours:',size=(12,1)), sg.Input(default_text='12,24',size=(15,1),key='-SAMPLE_N-',tooltip='[int]: How many different colors to sample from the palette')],
                 [sg.Text('Sigma:',size=(12,1)), sg.Input(default_text='1,1',size=(15,1),key='-SIGMA-',tooltip='[int]: Standard deviation of the gaussian smoothing')],
-                [sg.Button('Upload parameters',key='-UPLOAD-')]
+                [sg.Push(),sg.Button('Upload parameters',key='-UPLOAD-'),sg.Push()],
             ], title='Glint customisation',font='Arial 8 bold',size=(460,240))],
 
             [sg.Frame(layout=[
                 [sg.Text('Mask Threshold:',size=(12,1)), 
                 sg.Input(default_text='0.5,0.6',size=(15,1),key='-THRESHOLD-',tooltip='[float]: Threshold for identifying levels of brightness in the image to apply glint on'),
-                sg.Button('Generate')],
-            ], title='Mask customisation',font='Arial 8 bold',size=(460,60))],
+                sg.Button('Generate'),sg.Button('Save masks',key='-SAVE_MASKS-',tooltip='Save a list of masks with the threshold and the corresponding threshold is stored in a json file')],
+                [sg.Push(),sg.Button('Import masks',key='-IMPORT_MASKS-',tooltip='Import masks that are stored in a folder'),sg.Push()]
+            ], title='Mask customisation',font='Arial 8 bold',size=(460,100))],
 
         ]
 
@@ -89,7 +90,16 @@ def get_main_window():
                 [sg.Text('Contrast:',size=(12,1)), sg.Input(size=(5,1),key='-CONTRAST_AUG-',tooltip='[float]: Influences how green/blue the colors are. Lower contrast means the greener/darker the water spectra is')],
                 [sg.Text('Sample colours:',size=(12,1)), sg.Input(size=(5,1),key='-SAMPLE_N_AUG-',tooltip='[int]: How many different colors to sample from the palette')],
                 [sg.Text('Sigma:',size=(12,1)), sg.Input(size=(5,1),key='-SIGMA_AUG-',tooltip='[int]: Standard deviation of the gaussian smoothing')],
-            ], title='Augmentation',font='Arial 8 bold',size=(460,180))],
+            ], title='Parameters augmentation',font='Arial 8 bold',size=(460,180))],
+
+            [sg.Frame(layout=[
+                [sg.Text('Mask Threshold:',size=(12,1)), 
+                sg.Input(default_text='0.5,0.6',size=(15,1),key='-THRESHOLD-',tooltip='[float]: Threshold for identifying levels of brightness in the image to apply glint on')],
+                [sg.Text('Rotation:',size=(12,1)), 
+                sg.Input(default_text='-180,180',size=(15,1),key='-ROTATION-')],
+                [sg.Text('Scale:',size=(12,1)), 
+                sg.Input(default_text='1,40',size=(15,1),key='-Scale-')],
+            ], title='Masks augmentation',font='Arial 8 bold',size=(460,180))],
     ]
     left_layout = [
                 [sg.TabGroup([[
@@ -127,6 +137,7 @@ main_window = get_main_window()
 #------------button states of window---------------
 main_window['Split'].update(disabled=True)
 main_window['Generate'].update(disabled=True)
+main_window['-SAVE_MASKS-'].update(disabled=True)
 main_window['Prev'].update(disabled=True)
 main_window['Next'].update(disabled=True)
 main_window['Process'].update(disabled=True)
@@ -134,6 +145,7 @@ main_window['-PROCESS_ALL-'].update(disabled=True)
 main_window['Save'].update(disabled=True)
 #------------initialisation-----------------------
 cut_img_counter = 0
+loaded_mask = False
 
 
 while True:
@@ -213,7 +225,63 @@ while True:
             current_img = cut_img[cut_img_counter%len(cut_img)]
             current_mask = cut_mask[cut_img_counter%len(cut_mask)]
             # just to preview the mask
-            _ = gp.create_masks(current_img,current_mask,mask_threshold,plot=True,plot_gui=True)
+            _,mask_list = gp.create_masks(current_img,current_mask,mask_threshold,plot=True,plot_gui=True)
+            main_window['-SAVE_MASKS-'].update(disabled=False)
+    
+    if event == '-SAVE_MASKS-':
+        # mask list is a dictionary with the thresholds as the keys
+        if values['-STORE_DIR_PATH-'] == '':
+            fp_store = sg.popup_get_folder("Specify directory to store image")
+        else:
+            fp_store = values['-STORE_DIR_PATH-']
+        
+        if fp_store is None:
+            sg.popup('Masks not saved. Indicate the directory again.')
+            pass
+        else:
+            # create a unique directory where each unique folder has a list of masks with different thresholds
+            dir_save_mask = 'saved_masks'
+            fp_store = join(fp_store,dir_save_mask)
+            fp_store = utils.uniquify(fp_store)
+            mkdir(fp_store)
+            
+            # fp_store = join(fp_store,dir_save_mask)
+            fn = values['-IMAGE_LIST-'][0].replace('.tif','') #base name will be the name of the image so that the generated image is the same as the mask
+            postfix = cut_img_counter%len(cut_mask) #number of the cut image
+            fp = join(fp_store,'{}_{:02}.txt'.format(fn,postfix))
+            fp = utils.uniquify(fp)
+            with open(fp, 'w') as f:
+                for line in list(mask_list): #only save the threshold values
+                    f.write(f"{line}\n")
+
+            for im in mask_list.values():
+                utils.save_img(im,fp_store,fn,postfix=str(postfix).zfill(2),overwrite=False)
+            
+            sg.popup('Masks saved successfully')
+
+    if event == '-IMPORT_MASKS-':
+        mask_folder = sg.popup_get_folder("Specify directory where a list of masks (512 x 512) are stored")
+        if mask_folder is None:
+            sg.popup('Masks not imported. Re-select folder.')
+            pass
+        else:
+            # print(mask_folder)
+            loaded_mask_list = [np.asarray(PIL.Image.open(join(mask_folder,f))) for f in sorted(listdir(mask_folder)) if f.endswith('.png')]
+            threshold_fp = [join(mask_folder,f) for f in listdir(mask_folder) if f.endswith('.txt')][0]
+            threshold_list = utils.read_txt_into_list(threshold_fp)
+            # print('list of mask list: {}'.format(threshold_list))
+            try:
+                mask_list = {}
+                for t, im in zip(threshold_list,loaded_mask_list):
+                    mask_list[t] = im
+                sg.popup('Masks successfully loaded. Masks will be used for simulating glint.')
+                # print('list of mask list: {}'.format(list(mask_list)))
+                loaded_mask = True
+            except Exception as E:
+                sg.popup('Masks not loaded properly')
+                loaded_mask = False
+                mask_list = None
+                pass
 
     if event == 'Next':
         cut_img_counter += 1
@@ -326,22 +394,117 @@ while True:
                         cut_img = cut_mask = None
                         pass
                     
-                if cut_img is not None and cut_mask is not None:
+                if cut_img is not None and cut_mask is not None: #ensure that non-glint and mask are successfully loaded
                     current_img = cut_img[cut_img_counter%len(cut_img)]
                     current_mask = cut_mask[cut_img_counter%len(cut_mask)]
-                    # create mask threshold
-                    non_glint,mask_list = gp.create_masks(current_img,current_mask,mask_threshold,plot=False,plot_gui=False)
+                    # check whether if a corresponding mask is used or a loaded mask is used
+                    if loaded_mask is False:
+                        # create mask threshold
+                        non_glint,mask_list = gp.create_masks(current_img,current_mask,mask_threshold,plot=False,plot_gui=False)
+                    else:
+                        non_glint = current_img #mask_list has already been created from generate mask
+                        # check if number of loaded mask = number of parameters
+                        if v1.shape[0] != len(list(mask_list)):
+                            sg.popup('Number of masks loaded in is not equal to the number of parameters keyed in.')
+                            mask_list = None
+                            pass
+
                     # apply glint
-                    simulated_glint = gp.apply_glint_mask(non_glint,mask_list,params_dict,palette_dict,plot=True,plot_gui=True)
-                    # preview simulated glint
-                    window['-PREVIEW_IMAGE-'].update(data=gu.array_to_bytes(simulated_glint, resize=(300,300),binary=False))
-                    
-                    
-                    window['Save'].update(disabled=False)
-                    window['-PROCESS_ALL-'].update(disabled=False)
+                    if mask_list is None:
+                        sg.popup('Glint simulation failed')
+                        pass
+                    else:
+                        simulated_glint = gp.apply_glint_mask(non_glint,mask_list,params_dict,palette_dict,plot=True,plot_gui=True)
+                        # preview simulated glint
+                        window['-PREVIEW_IMAGE-'].update(data=gu.array_to_bytes(simulated_glint, resize=(300,300),binary=False))
+                        
+                        window['Save'].update(disabled=False)
+                        window['-PROCESS_ALL-'].update(disabled=False)
+
                 else:
                     pass
     
+    if event == '-PROCESS_ALL-': #process and save all images
+        if values['-STORE_DIR_PATH-'] == '':
+            fp_store = sg.popup_get_folder("Specify directory to store image")
+        else:
+            fp_store = values['-STORE_DIR_PATH-']
+        
+        # make directory of:
+        # original image without glint
+        dir_non_glint = 'non_glint_cut'
+        # glint mask
+        dir_glint_mask = 'glint_mask_cut'
+        # simulated glint
+        dir_sim_glint = 'sim_glint_cut'
+        # params
+        dir_params = 'params'
+
+        if exists(join(fp_store,dir_non_glint)) is False:
+            mkdir(join(fp_store,dir_non_glint))
+        if exists(join(fp_store,dir_glint_mask)) is False:
+            mkdir(join(fp_store,dir_glint_mask))
+        if exists(join(fp_store,dir_sim_glint)) is False:
+            mkdir(join(fp_store,dir_sim_glint))
+        if exists(join(fp_store,dir_params)) is False:
+            mkdir(join(fp_store,dir_params))
+
+        if loaded_mask is True:
+            
+            for i, (current_img,current_mask) in enumerate(zip(cut_img,cut_mask)):
+                if np.sum(current_mask) < 50: #if no water body is present, then the sum of the mask will be 0
+                    continue #dont simulate glint when there's no water body present
+                else:
+                    mask_list_copy = mask_list.copy() #make a copy of the mask_list cus it will keep overwriting the masklist after every iteration
+                    # make sure that imported mask and current masks are consistent in the masking of non-water objects
+                    # so that glint will not be applied on non-water objects
+                    for t, m in mask_list.items():
+                        mask_list_copy[t] = m*current_mask
+                    simulated_glint = gp.apply_glint_mask(current_img,mask_list_copy,params_dict,palette_dict,plot=False,plot_gui=False)
+                    save_dict = {dir_non_glint: current_img,
+                                dir_glint_mask: mask_list_copy[list(mask_list_copy)[0]], #take the first mask from the list because the mask with the lowest threshold has the largest area coverage of simulated glint
+                                dir_sim_glint: simulated_glint} 
+                    postfix = str(i).zfill(2) #append number of the cut_img
+                    # remember to process first before saving
+                    
+                    # save images in their respective folders
+                    for dir, im in save_dict.items():
+                        utils.save_img(im,join(fp_store,dir),basename_img,prefix='',postfix=postfix,ext=".png",overwrite=False) #do not overwrite file because of different params settings on the same img
+            
+            # save parameters for repeatability
+            param_fp = utils.uniquify(join(fp_store,dir_params,f'{basename_img}.json'))
+            with open(param_fp,'w') as cf:
+                params_json = {k:v.tolist() for k,v in params_dict.items()}
+                params_json['-THRESHOLD-'] = mask_threshold.tolist()
+                json.dump(params_json,cf)
+            sg.popup('Simulated glint applied on all the cut images using the SAME loaded mask')
+        
+        else:
+            for i, (current_img,current_mask) in enumerate(zip(cut_img,cut_mask)): # iterate across the images and their corresponding masks
+                if np.sum(current_mask) < 50: #if no water body is present, then the sum of the mask will be 0
+                    continue
+                else:
+                    non_glint,mask_list = gp.create_masks(current_img,current_mask,mask_threshold,plot=False,plot_gui=False)
+                    simulated_glint = gp.apply_glint_mask(non_glint,mask_list,params_dict,palette_dict,plot=False,plot_gui=False)
+            
+                    save_dict = {dir_non_glint: non_glint,
+                                dir_glint_mask: mask_list[list(mask_list)[0]], #take the first mask from the list because the mask with the lowest threshold has the largest area coverage of simulated glint
+                                dir_sim_glint: simulated_glint} 
+                    postfix = str(i).zfill(2) #append number of the cut_img
+                    # remember to process first before saving
+                    
+                    # save images in their respective folders
+                    for dir, im in save_dict.items():
+                        utils.save_img(im,join(fp_store,dir),basename_img,prefix='',postfix=postfix,ext=".png",overwrite=False) #do not overwrite file because of different params settings on the same img
+            
+            # save parameters for repeatability
+            param_fp = utils.uniquify(join(fp_store,dir_params,f'{basename_img}.json'))
+            with open(param_fp,'w') as cf:
+                params_json = {k:v.tolist() for k,v in params_dict.items()}
+                params_json['-THRESHOLD-'] = mask_threshold.tolist()
+                json.dump(params_json,cf)
+            sg.popup(f'Simulated glint applied on all the cut images using its corresponding mask. Files saved successfully in {fp_store}!')
+
     if event == 'Save': #only save one cut_image
         if values['-STORE_DIR_PATH-'] == '':
             fp_store = sg.popup_get_folder("Specify directory to store image")
@@ -358,7 +521,6 @@ while True:
         # params
         dir_params = 'params'
 
-        fp_store = values['-STORE_DIR_PATH-']
         if exists(join(fp_store,dir_non_glint)) is False:
             mkdir(join(fp_store,dir_non_glint))
         if exists(join(fp_store,dir_glint_mask)) is False:
@@ -369,8 +531,8 @@ while True:
             mkdir(join(fp_store,dir_params))
         
         save_dict = {dir_non_glint: non_glint,
-                    dir_glint_mask: mask_list[list(mask_list)[0]], 
-                    dir_sim_glint:simulated_glint} #take the first mask from the list
+                    dir_glint_mask: mask_list[list(mask_list)[0]], #take the first mask from the list because the mask with the lowest threshold has the largest area coverage of simulated glint
+                    dir_sim_glint:simulated_glint} 
         postfix = str(cut_img_counter%len(cut_img)).zfill(2) #append number of the cut_img
         # remember to process first before saving
 

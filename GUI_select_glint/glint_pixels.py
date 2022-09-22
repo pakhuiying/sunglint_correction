@@ -323,10 +323,10 @@ def roll_column(a,shift_array,width):
 def apply_glint_mask(non_glint,glint_mask_list,params_dict,palette_dict = None,plot=True,plot_gui=False):
     """
     non_glint (np.array)
-    glint_mask_list (dictionary. keys: threshold, value:np.array of mask):in increasing order of threshold that is used to create the mask
+    glint_mask_list (dictionary. keys: threshold, value: 2D np.array of mask):in increasing order of threshold that is used to create the mask
     """
 
-    #initialise plot
+    # initialise plot
     if plot is True:
         fig, axes = plt.subplots(2,len(glint_mask_list.keys())+1,figsize=(10,5))
 
@@ -368,10 +368,10 @@ def apply_glint_mask(non_glint,glint_mask_list,params_dict,palette_dict = None,p
                                                     params_dict['-CONTRAST-'][i]))
 
     nrow,ncol = glint_mask_list[list(glint_mask_list)[0]].shape
-    print(nrow,ncol)
+    # print(nrow,ncol)
     # c0_row,c0_col = c_list[-1].shape[0],c_list[-1].shape[1]
     mrow,mcol = ceil(nrow/c0_row), ceil(ncol/c0_col)
-    print(mrow,mcol)
+    # print(mrow,mcol)
     
     
     simulated_glint = non_glint.copy()
@@ -402,7 +402,7 @@ def apply_glint_mask(non_glint,glint_mask_list,params_dict,palette_dict = None,p
 def create_masks(non_glint,non_glint_mask,thresh_array,plot=True,plot_gui=False):
     """ 
     non_glint (3D np.array): non glint image
-    non_glint_mask (2D np.array): a mask that masks non-water objects
+    non_glint_mask (2D np.array): a mask that masks non-water objects (water = 1, non-water = 0)
     thresh_array (1D np.array, or tuple, or list): thresh in ascending order
     """
     #mask object
