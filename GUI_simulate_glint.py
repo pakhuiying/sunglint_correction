@@ -8,7 +8,7 @@ import numpy as np
 import PIL.Image
 import matplotlib.pyplot as plt
 from os.path import join, basename, isdir, isfile, exists
-from os import listdir, mkdir
+from os import listdir, mkdir, remove
 from skimage.color import rgb2gray
 from random import randrange,sample
 from math import ceil
@@ -25,8 +25,8 @@ def get_main_window():
                 [sg.Input(size=(50,1), key='-IMAGE_FOLDER_PATH-',enable_events=True), sg.FolderBrowse()],
                 [sg.Text('Image mask folder path:', tooltip='Folder where binary masks are stored')],
                 [sg.Input(size=(50,1), key='-MASK_FOLDER_PATH-',enable_events=True), sg.FolderBrowse()],
-                [sg.Text('Prefix for files:')],
-                [sg.Input(size=(50,1),default_text='input_prefix',key='-PREFIX-')],
+                # [sg.Text('Prefix for files:')],
+                # [sg.Input(size=(50,1),default_text='input_prefix',key='-PREFIX-')],
                 [sg.Text('Directory to store processed images:')],
                 [sg.Input(size=(50,1), key='-STORE_DIR_PATH-'), sg.FolderBrowse()],
             ]
@@ -57,10 +57,10 @@ def get_main_window():
 
     tab2_layout = [
             [sg.Frame(layout=[
-                [sg.Text('Colour step:',size=(12,1)), sg.Input(size=(5,1),key='-COLOR_STEP-',tooltip='How many colors to sample from mpl.cm Spectral palette (color resolution)')],
-                [sg.Text('Spectra step:',size=(12,1)), sg.Input(size=(5,1),key='-SPECTRA_STEP-',tooltip='Number of interpolation steps between spectra to color')],
-                [sg.Text('Cut off:',size=(12,1)), sg.Input(size=(5,1),key='-CUT_OFF-',tooltip='How much of the extreme red and blue to remove from cm.Spectral')],
-                [sg.Text('Extend extreme:',size=(12,1)), sg.Input(size=(5,1),key='-EXTEND_EXTREME-',tooltip='How much of the red and blue to interpolate to the target spectrum as a multiple of spectra_step')],
+                [sg.Text('Colour step:',size=(12,1)), sg.Input(default_text='100',size=(5,1),key='-COLOR_STEP-',tooltip='How many colors to sample from mpl.cm Spectral palette (color resolution)')],
+                [sg.Text('Spectra step:',size=(12,1)), sg.Input(default_text='25',size=(5,1),key='-SPECTRA_STEP-',tooltip='Number of interpolation steps between spectra to color')],
+                [sg.Text('Cut off:',size=(12,1)), sg.Input(default_text='0.2',size=(5,1),key='-CUT_OFF-',tooltip='How much of the extreme red and blue to remove from cm.Spectral')],
+                [sg.Text('Extend extreme:',size=(12,1)), sg.Input(default_text='2',size=(5,1),key='-EXTEND_EXTREME-',tooltip='How much of the red and blue to interpolate to the target spectrum as a multiple of spectra_step')],
             ], title='Glint palette',font='Arial 8 bold',size=(460,130))],
 
             [sg.Frame(layout=[
@@ -85,31 +85,47 @@ def get_main_window():
 
     tab3_layout = [
             [sg.Frame(layout=[
-                [sg.Text('Brightness:',size=(12,1)), sg.Input(size=(5,1),key='-BRIGHTNESS_AUG-',tooltip='[int]: How much white/dark is in the colours')],
-                [sg.Text('Saturation:',size=(12,1)), sg.Input(size=(5,1),key='-SATURATION_AUG-',tooltip='[0,1] (float): Influences how obvious the rainbow spectra is. Low saturation means it is closer to the water spectra')],
-                [sg.Text('Contrast:',size=(12,1)), sg.Input(size=(5,1),key='-CONTRAST_AUG-',tooltip='[float]: Influences how green/blue the colors are. Lower contrast means the greener/darker the water spectra is')],
-                [sg.Text('Sample colours:',size=(12,1)), sg.Input(size=(5,1),key='-SAMPLE_N_AUG-',tooltip='[int]: How many different colors to sample from the palette')],
-                [sg.Text('Sigma:',size=(12,1)), sg.Input(size=(5,1),key='-SIGMA_AUG-',tooltip='[int]: Standard deviation of the gaussian smoothing')],
-            ], title='Parameters augmentation',font='Arial 8 bold',size=(460,180))],
+                [sg.Push(),sg.Button('Open folder'),sg.Push()],
+                [sg.Push(),sg.Text(size=(45,1),key='-IMAGE_FP-'),sg.Push()],
+                [sg.Push(),sg.Image(key='-MANAGE_IMAGE-'),sg.Push()],
+                [sg.Push(),sg.Button('Prev',key='-PREV-'),
+                    sg.Button('Next',key='-NEXT-'),
+                    sg.Spin(values=[],key='-SPINNER-',enable_events=True,tooltip='Image number sequence to jump to a specific image number'),
+                    sg.Push()],
+                [sg.Push(),sg.Button('Delete'),sg.Push()],
+            ], title='Manage',font='Arial 8 bold',size=(460,500))],
 
-            [sg.Frame(layout=[
-                [sg.Text('Mask Threshold:',size=(12,1)), 
-                sg.Input(default_text='0.5,0.6',size=(15,1),key='-THRESHOLD-',tooltip='[float]: Threshold for identifying levels of brightness in the image to apply glint on')],
-                [sg.Text('Rotation:',size=(12,1)), 
-                sg.Input(default_text='-180,180',size=(15,1),key='-ROTATION-')],
-                [sg.Text('Scale:',size=(12,1)), 
-                sg.Input(default_text='1,40',size=(15,1),key='-Scale-')],
-            ], title='Masks augmentation',font='Arial 8 bold',size=(460,180))],
     ]
+
+    # tab3_layout = [
+    #         [sg.Frame(layout=[
+    #             [sg.Text('Brightness:',size=(12,1)), sg.Input(size=(5,1),key='-BRIGHTNESS_AUG-',tooltip='[int]: How much white/dark is in the colours')],
+    #             [sg.Text('Saturation:',size=(12,1)), sg.Input(size=(5,1),key='-SATURATION_AUG-',tooltip='[0,1] (float): Influences how obvious the rainbow spectra is. Low saturation means it is closer to the water spectra')],
+    #             [sg.Text('Contrast:',size=(12,1)), sg.Input(size=(5,1),key='-CONTRAST_AUG-',tooltip='[float]: Influences how green/blue the colors are. Lower contrast means the greener/darker the water spectra is')],
+    #             [sg.Text('Sample colours:',size=(12,1)), sg.Input(size=(5,1),key='-SAMPLE_N_AUG-',tooltip='[int]: How many different colors to sample from the palette')],
+    #             [sg.Text('Sigma:',size=(12,1)), sg.Input(size=(5,1),key='-SIGMA_AUG-',tooltip='[int]: Standard deviation of the gaussian smoothing')],
+    #         ], title='Parameters augmentation',font='Arial 8 bold',size=(460,180))],
+
+    #         [sg.Frame(layout=[
+    #             [sg.Text('Mask Threshold:',size=(12,1)), 
+    #             sg.Input(default_text='0.5,0.6',size=(15,1),key='-THRESHOLD-',tooltip='[float]: Threshold for identifying levels of brightness in the image to apply glint on')],
+    #             [sg.Text('Rotation:',size=(12,1)), 
+    #             sg.Input(default_text='-180,180',size=(15,1),key='-ROTATION-')],
+    #             [sg.Text('Scale:',size=(12,1)), 
+    #             sg.Input(default_text='1,40',size=(15,1),key='-Scale-')],
+    #         ], title='Augmentation',font='Arial 8 bold',size=(460,180))],
+    # ]
     left_layout = [
                 [sg.TabGroup([[
                     sg.Tab('Required Inputs',tab1_layout),
                     sg.Tab('Image Preview',images_list_col),
                     sg.Tab('Mask Preview',mask_list_col),
                     sg.Tab('Parameters', tab2_layout),
-                    sg.Tab('Augmentation',tab3_layout)
+                    sg.Tab('Manage',tab3_layout),
                     ]],font='Arial 9 bold',pad=(5,10))],
-                [sg.Button('Process all',key='-PROCESS_ALL-',tooltip='Process all and SAVE the cut images of the same image'), sg.Exit()]
+                [sg.Button('Process all',key='-PROCESS_ALL-',tooltip='Process all and SAVE the cut images of the same image'), 
+                sg.Button('Augment all',key='-AUGMENT_ALL-',tooltip='Augment all the images within the subdirectories'), 
+                sg.Exit()]
             ]
 
     # images_list_col = [
@@ -140,9 +156,12 @@ main_window['Generate'].update(disabled=True)
 main_window['-SAVE_MASKS-'].update(disabled=True)
 main_window['Prev'].update(disabled=True)
 main_window['Next'].update(disabled=True)
+main_window['-PREV-'].update(disabled=True)
+main_window['-NEXT-'].update(disabled=True)
 main_window['Process'].update(disabled=True)
 main_window['-PROCESS_ALL-'].update(disabled=True)
 main_window['Save'].update(disabled=True)
+main_window['Delete'].update(disabled=True)
 #------------initialisation-----------------------
 cut_img_counter = 0
 loaded_mask = False
@@ -440,18 +459,23 @@ while True:
         # params
         dir_params = 'params'
 
-        if exists(join(fp_store,dir_non_glint)) is False:
-            mkdir(join(fp_store,dir_non_glint))
-        if exists(join(fp_store,dir_glint_mask)) is False:
-            mkdir(join(fp_store,dir_glint_mask))
-        if exists(join(fp_store,dir_sim_glint)) is False:
-            mkdir(join(fp_store,dir_sim_glint))
-        if exists(join(fp_store,dir_params)) is False:
-            mkdir(join(fp_store,dir_params))
+        dir_list = [dir_non_glint,dir_glint_mask,dir_sim_glint,dir_params]
+        for dir in dir_list:
+            if exists(join(fp_store,dir)) is False:
+                mkdir(join(fp_store,dir))
+        # if exists(join(fp_store,dir_non_glint)) is False:
+        #     mkdir(join(fp_store,dir_non_glint))
+        # if exists(join(fp_store,dir_glint_mask)) is False:
+        #     mkdir(join(fp_store,dir_glint_mask))
+        # if exists(join(fp_store,dir_sim_glint)) is False:
+        #     mkdir(join(fp_store,dir_sim_glint))
+        # if exists(join(fp_store,dir_params)) is False:
+        #     mkdir(join(fp_store,dir_params))
 
         if loaded_mask is True:
             
             for i, (current_img,current_mask) in enumerate(zip(cut_img,cut_mask)):
+                sg.one_line_progress_meter('Applying glint..',i,len(cut_mask)-1,orientation='h')
                 if np.sum(current_mask) < 50: #if no water body is present, then the sum of the mask will be 0
                     continue #dont simulate glint when there's no water body present
                 else:
@@ -481,6 +505,7 @@ while True:
         
         else:
             for i, (current_img,current_mask) in enumerate(zip(cut_img,cut_mask)): # iterate across the images and their corresponding masks
+                sg.one_line_progress_meter('Applying glint..',i,len(cut_mask)-1,orientation='h')
                 if np.sum(current_mask) < 50: #if no water body is present, then the sum of the mask will be 0
                     continue
                 else:
@@ -521,14 +546,18 @@ while True:
         # params
         dir_params = 'params'
 
-        if exists(join(fp_store,dir_non_glint)) is False:
-            mkdir(join(fp_store,dir_non_glint))
-        if exists(join(fp_store,dir_glint_mask)) is False:
-            mkdir(join(fp_store,dir_glint_mask))
-        if exists(join(fp_store,dir_sim_glint)) is False:
-            mkdir(join(fp_store,dir_sim_glint))
-        if exists(join(fp_store,dir_params)) is False:
-            mkdir(join(fp_store,dir_params))
+        dir_list = [dir_non_glint,dir_glint_mask,dir_sim_glint,dir_params]
+        for dir in dir_list:
+            if exists(join(fp_store,dir)) is False:
+                mkdir(join(fp_store,dir))
+        # if exists(join(fp_store,dir_non_glint)) is False:
+        #     mkdir(join(fp_store,dir_non_glint))
+        # if exists(join(fp_store,dir_glint_mask)) is False:
+        #     mkdir(join(fp_store,dir_glint_mask))
+        # if exists(join(fp_store,dir_sim_glint)) is False:
+        #     mkdir(join(fp_store,dir_sim_glint))
+        # if exists(join(fp_store,dir_params)) is False:
+        #     mkdir(join(fp_store,dir_params))
         
         save_dict = {dir_non_glint: non_glint,
                     dir_glint_mask: mask_list[list(mask_list)[0]], #take the first mask from the list because the mask with the lowest threshold has the largest area coverage of simulated glint
@@ -548,9 +577,136 @@ while True:
 
         sg.popup(f'Files saved successfully in {fp_store}!')
 
+    if event =='-AUGMENT_ALL-':
+        augment_bool = sg.popup_yes_no('Make sure all images are simulated already then perform augmentation. Confirm augmenting all images?')  # Shows Yes and No buttons
+        if augment_bool == 'Yes':
+            fp_store = sg.popup_get_folder('Select folder where sub-directories: non_glint_cut, glint_mask_cut,sim_glint_cut are contained')
+            if fp_store is None:
+                sg.popup('No folder is selected. Augment failed.')
+                pass
+            else:
+                # original image without glint
+                dir_non_glint = 'non_glint_cut'
+                # glint mask
+                dir_glint_mask = 'glint_mask_cut'
+                # simulated glint
+                dir_sim_glint = 'sim_glint_cut'
+
+                dir_list = [dir_non_glint,dir_glint_mask,dir_sim_glint]
+                
+                create_augment_dir = True
+                dir_augment = 'augment'
+
+                # check if the relevant subdirectories exist. if one of them don't exist, DO NOT AUGMENT
+                for dir in dir_list:
+                    if exists(join(fp_store,dir)) is False:
+                        create_augment_dir = False
+
+                if create_augment_dir is True:
+                    # create an augment directory
+                    if exists(join(fp_store,dir_augment)) is False:
+                        mkdir(join(fp_store,dir_augment))
+                    # create subdirectories within the augment directory
+                    for dir in dir_list:
+                        if exists(join(fp_store,dir_augment,dir)) is False:
+                            mkdir(join(fp_store,dir_augment,dir))
+                    # for all the images in each subdirectory, augment the images
+                    for dir in dir_list:
+                        img_list = utils.open_images_from_directory(join(fp_store,dir))
+                        len_img = len(img_list)
+                        for i,im in enumerate(img_list):
+                            augmented_im = utils.augment_img(im)
+                            len_aug = len(augmented_im)
+                            for j,aug in enumerate(augmented_im):
+                                sg.one_line_progress_meter('Applying augmentation..',i*len_aug+j,len_img*len_aug-1,orientation='h')
+                                # save img
+                                utils.save_img(aug,
+                                join(fp_store,dir_augment,dir),
+                                'output',
+                                prefix='',
+                                postfix=str(i*len_aug+j).zfill(6),
+                                ext=".png",overwrite=False)
+                    
+                    sg.popup('Augment successful.')
+                else:
+                    sg.popup('Relevant subdirectories: {} d.n.e. Augment failed.'.format(dir_list))
+                    pass
+
         
+        else:
+            pass
+
+    if event == 'Open folder':
+        fp_store = sg.popup_get_folder('Select folder where images are contained')
+        if fp_store is None:
+            sg.popup('No folder is selected. Images did not load.')
+            pass
+        else:
+            fn_list = [join(fp_store,f) for f in sorted(listdir(fp_store)) if not f.endswith('.txt')]
+            window['-MANAGE_IMAGE-'].update(data=gu.convert_to_bytes(fn_list[0], resize=(350,350)))#only work for rgb images
+            total_imges = len(fn_list)
+            # update spinner
+            window['-SPINNER-'].update(values=list(range(total_imges)))
+            # enable buttons
+            main_window['-PREV-'].update(disabled=False)
+            main_window['-NEXT-'].update(disabled=False)
+            main_window['Delete'].update(disabled=False)
+            # re(start) counter
+            counter_mng = 0
+            window['-IMAGE_FP-'].update('[{}/{}]: {}'.format(counter_mng+1,total_imges,basename(fn_list[counter_mng%total_imges])))
+    
+    if event == '-PREV-':
+        counter_mng -= 1
+        while exists(fn_list[counter_mng%total_imges]) is False:
+            counter_mng -= 1 #keep decreasing until file at a counter_mng exists
+        
+        window['-MANAGE_IMAGE-'].update(data=gu.convert_to_bytes(fn_list[counter_mng%total_imges], resize=(350,350)))#only work for rgb images
+        window['-IMAGE_FP-'].update('[{}/{}]: {}'.format((counter_mng+1)%total_imges,total_imges,basename(fn_list[counter_mng%total_imges])))
+    
+    if event == '-NEXT-':
+        counter_mng += 1
+        while exists(fn_list[counter_mng%total_imges]) is False:
+            counter_mng += 1 #keep decreasing until file at a counter_mng exists
+        
+        window['-MANAGE_IMAGE-'].update(data=gu.convert_to_bytes(fn_list[counter_mng%total_imges], resize=(350,350)))#only work for rgb images
+        window['-IMAGE_FP-'].update('[{}/{}]: {}'.format((counter_mng+1)%total_imges,total_imges,basename(fn_list[counter_mng%total_imges])))
+    
+    if event == '-SPINNER-':
+        #update the counter to the value of the spinner
+        counter_mng = values['-SPINNER-']
+        while exists(fn_list[counter_mng%total_imges]) is False:
+            counter_mng += 1 #keep decreasing until file at a counter_mng exists
+        
+        window['-MANAGE_IMAGE-'].update(data=gu.convert_to_bytes(fn_list[counter_mng%total_imges], resize=(350,350)))#only work for rgb images
+        window['-IMAGE_FP-'].update('[{}/{}]: {}'.format((counter_mng+1)%total_imges,total_imges,basename(fn_list[counter_mng%total_imges])))
+
+    if event == 'Delete':
+        del_bool = sg.popup_yes_no('Confirm deleting this image?')  # Shows Yes and No buttons
+        if del_bool == 'Yes':
+            #del current image and move on to the next img
+            if exists(fn_list[counter_mng%total_imges]) is True:
+                remove(fn_list[counter_mng%total_imges])
+            else:
+                sg.popup('This file already has been deleted or d.n.e')
+            # append deleted filepath to a text file
+            with open(join(fp_store,"deleted_files.txt"),"a") as myfile:
+                myfile.write(f"{fn_list[counter_mng%total_imges]}\n")
+
+            counter_mng += 1
+            total_imges -= 1
+            while exists(fn_list[counter_mng%total_imges]) is False:
+                counter_mng += 1 #keep decreasing until file at a counter_mng exists
+        
+            window['-MANAGE_IMAGE-'].update(data=gu.convert_to_bytes(fn_list[counter_mng%total_imges], resize=(350,350)))#only work for rgb images
+            window['-IMAGE_FP-'].update('[{}/{}]: {}'.format((counter_mng+1)%total_imges,total_imges,basename(fn_list[counter_mng%total_imges])))
 
 
+            
+            
+        else:
+            pass
+    
+    
 
 
 

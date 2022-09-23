@@ -180,6 +180,45 @@ def mask_objects(model,img):
     mask = cv.resize(mask,(512,512))
     return mask
 
+def scale_img(img,scale_list= [1,1.2,1.4,1.6,1.8,2]):
+    """
+    scales image and then crop it to 512x512
+    returns a list of 5 images
+    """
+    # scale_list = [1.2,1.4,1.6,1.8,2]
+    scaled_img = []
+    nrow, ncol = img.shape[0],img.shape[1]
+    for r in scale_list:
+        width = int(ncol*r)
+        height = int(nrow*r)
+        image = cv.resize(img,(width,height),interpolation = cv.INTER_AREA)
+        scaled_img.append(image[:512,:512])
+    return scaled_img
+
+def rotate_img(img):
+    """
+    rotates image by 90cw, 180 and 90ccw
+    returns a list of 3 images
+    """
+    rotation_list = [cv.ROTATE_90_CLOCKWISE,cv.ROTATE_180,cv.ROTATE_90_COUNTERCLOCKWISE]
+    rotated_img = [img] #include original image
+    for r in rotation_list:
+        image = cv.rotate(img, r)
+        rotated_img.append(image)
+    return rotated_img
+
+def augment_img(img):
+    """
+    augment image using scale_img and rotate_img
+    """
+    rotated_img = rotate_img(img)
+    augmented_im = []
+    for im in rotated_img:
+        scaled_img = scale_img(im)
+        for s in scaled_img:
+            augmented_im.append(s)
+    return augmented_im
+
 def plot_an_image(img):
     plt.figure()
     if img.ndim == 3:
