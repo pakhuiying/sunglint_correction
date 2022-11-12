@@ -38,9 +38,9 @@ def get_main_window():
             ], title='Image list',font='Arial 8 bold',size=(460,230),element_justification='center')],
 
             [sg.Frame(layout=[
-                [sg.Image(key='-PREVIEW_WHOLE_IMAGE-')],#preview the entire image
                 [sg.Button('Split',tooltip='To split the image into 512 by 512 px')], #pop up a window to show all the cut images
-            ], title='Image preview',font='Arial 8 bold',size=(460,180),element_justification='center')],        
+                [sg.Image(key='-PREVIEW_WHOLE_IMAGE-')],#preview the entire image
+            ], title='Image preview',font='Arial 8 bold',size=(460,250),element_justification='center')],        
         ]
 
     mask_list_col = [
@@ -199,10 +199,26 @@ while True:
         window['-PREVIEW_WHOLE_MASK-'].update(data=gu.array_to_bytes(filename, resize=(300,300),binary=True))
 
     if event == 'Split':
+        if values['-STORE_DIR_PATH-'] == '':
+            fp_store = sg.popup_get_folder("Specify directory to store image")
+        else:
+            fp_store = values['-STORE_DIR_PATH-']
+
         filename = join(values['-IMAGE_FOLDER_PATH-'],values['-IMAGE_LIST-'][0])
         img = np.asarray(PIL.Image.open(filename))
         cut_img = utils.cut_into_512(img)
         utils.preview_cut_img(cut_img,gui_plot=True)
+        # make directory of:
+        # original image without glint
+        dir_non_glint_no_dup = 'non_glint_cut_no_dup' # to store non-duplicated images
+        if exists(join(fp_store,dir_non_glint_no_dup)) is False:
+                mkdir(join(fp_store,dir_non_glint_no_dup))
+
+        for i, current_img in enumerate(cut_img):
+            postfix = str(i).zfill(2) #append number of the cut_img
+            utils.save_img(current_img,join(fp_store,dir_non_glint_no_dup),
+                values['-IMAGE_LIST-'][0].replace('.tif',''),
+                prefix='',postfix=postfix,ext=".png",overwrite=True) #overwrite file to avoid duplicates
         # after cutting image, enable next, prev buttons, and generate buttons
         window['Prev'].update(disabled=False)
         window['Next'].update(disabled=False)
@@ -322,7 +338,8 @@ while True:
             with open(params_file) as cf:
                 params_file = json.load(cf)
             for k,v in params_file.items():
-                window[k].update(v)
+                # window[k].update(v)
+                window[k].update(','.join([str(i) for i in v]))
         
         except Exception as E:
             sg.popup(f'{E}')
@@ -463,14 +480,6 @@ while True:
         for dir in dir_list:
             if exists(join(fp_store,dir)) is False:
                 mkdir(join(fp_store,dir))
-        # if exists(join(fp_store,dir_non_glint)) is False:
-        #     mkdir(join(fp_store,dir_non_glint))
-        # if exists(join(fp_store,dir_glint_mask)) is False:
-        #     mkdir(join(fp_store,dir_glint_mask))
-        # if exists(join(fp_store,dir_sim_glint)) is False:
-        #     mkdir(join(fp_store,dir_sim_glint))
-        # if exists(join(fp_store,dir_params)) is False:
-        #     mkdir(join(fp_store,dir_params))
 
         if loaded_mask is True:
             
