@@ -3,6 +3,10 @@ import os, glob
 import json
 import tqdm
 import pickle #This library will maintain the format as well
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
+import matplotlib.pyplot as plt
+import numpy as np
 
 def list_img_subdir(dir):
     """ 
@@ -164,3 +168,60 @@ def load_dls_panel_irr(fp):
         dls_panel_irr = pickle.load(fp)
 
     return dls_panel_irr
+
+class RadiometricCorrection:
+    def __init__(self,dls_panel_irr,center_wavelengths,dls_panel_irr_calibration=None):
+        self.dls_panel_irr = dls_panel_irr
+        self.number_of_bands = 10
+        self.center_wavelengths = center_wavelengths
+        self.dls_panel_irr_calibration=dls_panel_irr_calibration
+
+    def get_dls_panel_irr_by_band(self):
+        """ obtain dls panel irradiance in band order i.e. 1,2,3,4,5,6,7,8,9,10"""
+        panel_irr = {i:[] for i in range(self.number_of_bands)}
+        dls_irr = {i:[] for i in range(self.number_of_bands)}
+        for k, list_of_d in self.dls_panel_irr.items():
+            for d in list_of_d:
+                for i,dls in enumerate(d['dls']):
+                    dls_irr[i].append(dls)
+                for i,panel in enumerate(d['panel']):
+                    panel_irr[i].append(panel)
+        return {'dls':dls_irr,'panel':panel_irr}
+
+    def plot(self):
+        """ plot relationship between dls and panel irradiance by band order i.e. 1,2,3,4,5,6,7,8,9,10"""
+        dls_panel_irr_by_band = self.get_dls_panel_irr_by_band()
+        if self.dls_panel_irr_calibration is None:
+            model_coeff = self.fit_curve_by_band()
+        else:
+            model_coeff = self.dls_panel_irr_calibration
+        fig, axes = plt.subplots(self.number_of_bands//2,2,figsize=(8,15))
+        for i,ax in zip(range(self.number_of_bands),axes.flatten()):
+            x = dls_panel_irr_by_band['dls'][i]
+            y = dls_panel_irr_by_band['panel'][i]
+            ax.plot(x,y,'o')
+            ax.set_title(r'Band {}: {} nm ($R^2:$ {:.3f}, N = {})'.format(i,self.center_wavelengths[i],model_coeff[i]['r2'],len(x)))
+            ax.set_xlabel(r'DLS irradiance $W/m^2/nm$')
+            ax.set_ylabel(r'Panel irradiance $W/m^2/nm$')
+            x_vals = np.linspace(np.min(x),np.max(x),50)
+            intercept = model_coeff[i]['intercept']
+            slope = model_coeff[i]['coeff']
+            y_vals = intercept + slope * x_vals
+            ax.plot(x_vals.reshape(-1,1), y_vals.reshape(-1,1), '--')
+            ax.text(0.1,ax.get_ylim()[1]*0.8,r"$y = {:.3f}x + {:.3f}$".format(slope,intercept))
+
+        plt.tight_layout()
+        return axes
+
+    def fit_curve_by_band(self):
+        """ get model coefficient for relationship between dls and panel irradiance by band order i.e. 1,2,3,4,5,6,7,8,9,10 """
+        dls_panel_irr_by_band = self.get_dls_panel_irr_by_band()
+        model_coeff = dict()#{i: None for i in range(10)}
+        for i in range(self.number_of_bands):
+            x = np.array(dls_panel_irr_by_band['dls'][i]).reshape(-1, 1)
+            y = np.array(dls_panel_irr_by_band['panel'][i]).reshape(-1, 1)
+            lm = LinearRegression().fit(x, y)
+            r2 = r2_score(y,lm.predict(x))
+            model_coeff[i] = {'coeff':lm.coef_[0][0],'intercept':lm.intercept_[0],'r2':r2}
+        
+        return model_coeff
