@@ -45,15 +45,26 @@ def rotations_degrees_to_rotation_matrix(rotation_degrees):
    sy = np.sin(np.deg2rad(rotation_degrees[1]))
    sz = np.sin(np.deg2rad(rotation_degrees[2]))
 
-   Rx = np.mat([  1,  0,  0,
+#    Rx = np.mat([  1,  0,  0,
+#                   0, cx,-sx,
+#                   0, sx, cx]).reshape(3,3)
+#    Ry = np.mat([ cy,  0, sy,
+#                   0,  1,  0,
+#                 -sy,  0, cy]).reshape(3,3)
+#    Rz = np.mat([ cz,-sz,  0,
+#                  sz, cz,  0,
+#                   0,  0,  1]).reshape(3,3)
+
+   Rx = np.array([  1,  0,  0,
                   0, cx,-sx,
                   0, sx, cx]).reshape(3,3)
-   Ry = np.mat([ cy,  0, sy,
+   Ry = np.array([ cy,  0, sy,
                   0,  1,  0,
                 -sy,  0, cy]).reshape(3,3)
-   Rz = np.mat([ cz,-sz,  0,
+   Rz = np.array([ cz,-sz,  0,
                  sz, cz,  0,
                   0,  0,  1]).reshape(3,3)
+
    R = Rx*Ry*Rz
    return R
 

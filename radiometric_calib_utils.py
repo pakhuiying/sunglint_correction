@@ -7,6 +7,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 import matplotlib.pyplot as plt
 import numpy as np
+import mutils
 
 def list_img_subdir(dir):
     """ 
@@ -111,7 +112,9 @@ def import_panel_irradiance(panelNames,panel_reflectance_by_band):
     """
     if panelNames is not None:
         panelCap = capture.Capture.from_filelist(panelNames)
+        # by calling panel_irradiance, it already accounts for all the radiometric calibration and correcting of vignetting effect and lens distortion
         panel_irradiance = panelCap.panel_irradiance(panel_reflectance_by_band)
+        # by calling dls_irradiance, it already returns a list of the corrected earth-surface (horizontal) DLS irradiance in W/m^2/nm
         dls_irradiance = panelCap.dls_irradiance()
         return {'dls':dls_irradiance,'panel':panel_irradiance}
     else:
@@ -133,15 +136,6 @@ def save_dls_panel_irr(panel_fp,panel_albedo):
     
     return dls_panel_irr
 
-def load_pickle(fp):
-    if fp.endswith('ob'):
-        with open(fp, 'rb') as fp:
-            data = pickle.load(fp)
-
-        return data
-    else:
-        print("Not a pickle file")
-        return None
 
 def load_panel_albedo(fp):
     """
@@ -225,3 +219,51 @@ class RadiometricCorrection:
             model_coeff[i] = {'coeff':lm.coef_[0][0],'intercept':lm.intercept_[0],'r2':r2}
         
         return model_coeff
+
+class CorrectionFactor:
+    def __init__(self,panel_radiance,dls_panel_irr_calibration,panel_albedo=None):
+        """ 
+        :param dls_panel_irr_calibration (dict): where keys (int) are band number (0 to 9), and values are dict, with keys coeff and intercept
+        :param panel_albedo (list of float): list of float ranging from 0 to 1. This parameter is fixed if the same panel is used
+        :param panel_radiance (list of float): radiance of panel (mission-specfic)
+        """
+        self.dls_panel_irr_calibration = dls_panel_irr_calibration
+        if panel_albedo is not None:
+            self.panel_albedo = panel_albedo
+        else:
+            self.panel_albedo = [0.48112499999999997,
+            0.4801333333333333,
+            0.4788733333333333,
+            0.4768433333333333,
+            0.4783016666666666,
+            0.4814866666666666,
+            0.48047166666666663,
+            0.4790833333333333,
+            0.47844166666666665,
+            0.4780333333333333]
+        self.panel_radiance = panel_radiance
+        self.correction_factor = self.get_correction()
+    
+    def get_correction(self):
+        """ outputs a list of float values in band order i.e. band 1,2,3,4,5,6,7,8,9,10"""
+        assert len(self.panel_albedo) == len(self.panel_radiance), "panel_albedo bands must equal to panel_radiance bands"
+        correction_factor = []
+        for band_number,model_calib in self.dls_panel_irr_calibration.items():
+            a = model_calib['coeff']
+            b = model_calib['intercept']
+            rho_crp = self.panel_albedo[band_number]
+            L_crp = self.panel_radiance[band_number]
+            cf = a/(1-b*rho_crp/(np.pi*L_crp))
+            correction_factor.append(cf)
+        return correction_factor
+
+def radiometric_corrected_aligned_captures(cap,cf,img_type = "reflectance"):
+    """
+    :param cap (Capture object)
+    :param cf (list of float): correction_factor obtained from CorrectionFactor.cf
+    This function aligns the band images, then apply the correction factor to all the bands. 
+    Note that the correction factor is mission-specific because it depends on the measured CRP radiance on that mission
+    returns the reflectance of image in reflectance (default) or "radiance"
+    """
+    im_aligned = mutils.align_captures(cap,img_type = img_type)
+    return np.multiply(im_aligned,np.array(cf))
