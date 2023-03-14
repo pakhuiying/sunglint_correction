@@ -3,11 +3,14 @@ from matplotlib.widgets import Button
 import matplotlib.patches as patches
 import PIL.Image as Image
 import json
-from os.path import join, split
-from os import listdir
+from os.path import join, split, exists
+from os import listdir, mkdir, getcwd
 import numpy as np
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from matplotlib.backend_bases import key_press_handler
+import cv2
+import glob
+import micasense.imageutils as imageutils
+import micasense.capture as capture
+import mutils
 
 def get_all_dir(fp,iter=3):
     """ get all parent sub directories up to 3 levels"""
@@ -19,21 +22,70 @@ def get_all_dir(fp,iter=3):
         fp_temp = base_fn
     return '_'.join(reversed(sub_dir_list))
 
+def import_captures(current_fp):
+    """
+    :param current_fp (str): filepath of micasense raw image IMG_****_1.tif
+    """
+    basename = current_fp[:-6]
+    fn = glob.glob('{}_*.tif'.format(basename))
+    fn = mutils.order_bands_from_filenames(fn)
+    cap = capture.Capture.from_filelist(fn)
+    return cap
+
+def aligned_capture(capture, img_type = 'reflectance',interpolation_mode=cv2.INTER_LANCZOS4):
+    """ 
+    :param capture (capture object): for 10-bands image
+    :param warp_matrices (mxmx3 np.ndarray): in rgb order of [2,1,0] loaded from pickle
+    :param cropped_dimensions (tuple): loaded from pickle
+    align images using the warp_matrices used for aligning 10-band images and outputs an rgb image
+    """
+
+    warp_mode = cv2.MOTION_HOMOGRAPHY
+    
+    width, height = capture.images[0].size()
+
+    rgb_band_indices = [2,1,0]
+
+    im_aligned = np.zeros((height,width,len(rgb_band_indices)), dtype=np.float32 )
+
+    for i,rgb_i in enumerate(rgb_band_indices):
+        if img_type == 'reflectance':
+            img = capture.images[rgb_i].undistorted_reflectance()
+        else:
+            img = capture.images[rgb_i].undistorted_radiance()
+
+        if warp_mode != cv2.MOTION_HOMOGRAPHY:
+            im_aligned[:,:,i] = cv2.warpAffine(img,
+                                            warp_matrices[rgb_i],
+                                            (width,height),
+                                            flags=interpolation_mode + cv2.WARP_INVERSE_MAP)
+        else:
+            im_aligned[:,:,i] = cv2.warpPerspective(img,
+                                                warp_matrices[rgb_i],
+                                                (width,height),
+                                                flags=interpolation_mode + cv2.WARP_INVERSE_MAP)
+    (left, top, w, h) = tuple(int(i) for i in cropped_dimensions)
+    im_cropped = im_aligned[top:top+h, left:left+w][:]
+
+    # get normalised rgb image
+    im_min = np.percentile(im_cropped.flatten(),  0.1)  # modify with these percentilse to adjust contrast
+    im_max = np.percentile(im_cropped.flatten(), 99.9)  # for many images, 0.5 and 99.5 are good values
+
+    im_display = np.zeros((im_cropped.shape[0],im_cropped.shape[1],len(rgb_band_indices)), dtype=np.float32)
+    
+    for i in range(len(rgb_band_indices)):
+        im_display[:,:,i] = imageutils.normalize(im_cropped[:,:,i], im_min, im_max)
+    
+    return im_display
+
+
+
 class LineBuilder:
     lock = "water"  # only one can be animated at a time
-    def __init__(self,dict_builder,fig,ax,im,rgb_fp,postfix):
+    def __init__(self,dict_builder,fig,ax,im,rgb_fp):
         self.dict_builder = dict_builder
         self.categories = list(dict_builder)
-        self.postfix = postfix
-        # self.prefix = prefix
-        # self.line_glint = line_glint
-        # self.r_glint = r_glint
-        # self.line_nonglint = line_nonglint
-        # self.r_nonglint = r_nonglint
-        # self.xs_glint = []#list(line.get_xdata())
-        # self.ys_glint = []#list(line.get_ydata())
-        # self.xs_nonglint = []#list(line.get_xdata())
-        # self.ys_nonglint = []#list(line.get_ydata())
+        
         for k in self.categories:
             setattr(self,k + '_x', []) #store x coord
             setattr(self,k + '_y', []) #store y coord
@@ -48,12 +100,8 @@ class LineBuilder:
         self.rgb_fp = rgb_fp
         self.n_img = len(rgb_fp)
         self.img_counter = 0
-        self.current_fp = None
-        #to save into json file, keep track of the last drawn bbox drawn on the img_line
-        # self.img_line_glint = 0
-        # self.img_line_nonglint = 0
-        # self.img_bbox_glint = None
-        # self.img_bbox_nonglint = None
+        self.current_fp = rgb_fp[0] # initialise with first fp
+        
 
 
     def __call__(self, event):
@@ -70,24 +118,7 @@ class LineBuilder:
         getattr(self,k+'_line').set_data(xs,ys)
         getattr(self,k+'_line').figure.canvas.draw_idle()
         self.draw_rect(event)
-        # if event.inaxes!=self.line_glint.axes or event.inaxes!=self.line_nonglint.axes:
-        #     return
-        # if LineBuilder.lock == "glint":
-        #     self.xs_glint.append(event.xdata)
-        #     self.ys_glint.append(event.ydata)
-        #     self.line_glint.set_data(self.xs_glint[-2:], self.ys_glint[-2:])
-        #     self.line_glint.figure.canvas.draw_idle()
-        #     print(self.xs_glint[-2:])
-        #     print(self.ys_glint[-2:])
-        #     self.draw_rect(event)
-        # else:
-        #     self.xs_nonglint.append(event.xdata)
-        #     self.ys_nonglint.append(event.ydata)
-        #     self.line_nonglint.set_data(self.xs_nonglint[-2:], self.ys_nonglint[-2:])
-        #     self.line_nonglint.figure.canvas.draw_idle()
-        #     print(self.xs_nonglint[-2:])
-        #     print(self.ys_nonglint[-2:])
-        #     self.draw_rect(event)
+        
 
     def draw_rect(self, _event):
         img_index = self.img_counter%self.n_img
@@ -103,26 +134,7 @@ class LineBuilder:
         getattr(self,k+'_patch').set_height(h)
         getattr(self,k+'_patch').set_width(w)
         self.current_fp = current_fp
-        # if LineBuilder.lock == "glint":
-        #     x1,x2 = self.xs_glint[-2:]
-        #     y1,y2 = self.ys_glint[-2:]
-        #     self.img_bbox_glint = ((int(x1),int(y1)),(int(x2),int(y2)))
-        #     h = y2 - y1
-        #     w = x2 - x1
-        #     self.r_glint.set_xy((x1,y1))
-        #     self.r_glint.set_height(h)
-        #     self.r_glint.set_width(w)
-        #     self.img_line_glint = current_fp #update img_line based don the latest rect patch drawn
-        # else:
-        #     x1,x2 = self.xs_nonglint[-2:]
-        #     y1,y2 = self.ys_nonglint[-2:]
-        #     self.img_bbox_nonglint = ((int(x1),int(y1)),(int(x2),int(y2)))
-        #     h = y2 - y1
-        #     w = x2 - x1
-        #     self.r_nonglint.set_xy((x1,y1))
-        #     self.r_nonglint.set_height(h)
-        #     self.r_nonglint.set_width(w)
-        #     self.img_line_nonglint = current_fp #update img_line based don the latest rect patch drawn
+        
 
     def reset(self, _event):
         """clear all points, lines and patches"""
@@ -135,28 +147,7 @@ class LineBuilder:
             getattr(self,k+'_patch').set_height(h)
             getattr(self,k+'_patch').set_width(w)
             getattr(self,k+'_line').figure.canvas.draw_idle()
-        # self.xs_glint = []
-        # self.ys_glint = []
-        # self.xs_nonglint = []
-        # self.ys_nonglint = []
-        # x1 = y1 = h = w = 0
-        # self.line_glint.set_data(self.xs_glint, self.ys_glint)
-        # self.r_glint.set_xy((x1,y1))
-        # self.r_glint.set_height(h)
-        # self.r_glint.set_width(w)
-        # self.line_glint.figure.canvas.draw_idle()
-
-        # self.line_nonglint.set_data(self.xs_nonglint, self.ys_nonglint)
-        # self.r_nonglint.set_xy((x1,y1))
-        # self.r_nonglint.set_height(h)
-        # self.r_nonglint.set_width(w)
-        # self.line_nonglint.figure.canvas.draw_idle()
-
-    # def glint(self, _event):
-    #     LineBuilder.lock = "glint"
-
-    # def non_glint(self, _event):
-    #     LineBuilder.lock = "nonglint"
+        
     def turbid_glint(self,_event):
         LineBuilder.lock = "turbid_glint"
 
@@ -176,24 +167,41 @@ class LineBuilder:
         
         save_bboxes = {self.current_fp:{k: getattr(self,k+'_bbox') for k in self.categories}}
         print(save_bboxes)
-        with open('identify_glint_{}.txt'.format(self.postfix),'w') as cf:
+        print(self.current_fp)
+        # get unique filename from current_fp
+        fn = get_all_dir(self.current_fp,iter=4)
+        
+
+        #create a new dir to store bboxes
+        store_dir = join(getcwd(),"saved_bboxes")
+        if not exists(store_dir):
+            mkdir(store_dir)
+
+        fp_store = join(store_dir,fn)
+        fp_store = fp_store.replace('.tif','')
+        print(f"File saved at {fp_store}!")
+        
+        with open('{}.txt'.format(fp_store),'w') as cf:
             json.dump(save_bboxes,cf)
-        # line_glint = int(self.img_line_glint.split('line_')[1][:2]) #get the current image line
-        # line_nonglint = int(self.img_line_nonglint.split('line_')[1][:2]) #get the current image line
-        # bboxes = {'glint':{'line':line_glint,'fp':self.img_line_glint,'bbox':self.img_bbox_glint},\
-        #     'non_glint':{'line':line_nonglint,'fp':self.img_line_nonglint,'bbox':self.img_bbox_nonglint}}
-        # with open('sunglint_correction_{}.txt'.format(self.prefix),'w') as cf:
-        #     json.dump(bboxes,cf)
+        
 
     def next(self, _event):
+        self.reset(_event)
+        self.save(_event)
+
         self.img_counter = self.img_counter+1
         img_index = self.img_counter%self.n_img
-        current_fp = self.rgb_fp[img_index] 
+        current_fp = self.rgb_fp[img_index]
+
+        cap = import_captures(current_fp)
+        img = aligned_capture(cap)
+        
+        # img = np.asarray(Image.open(current_fp))
+        # img = Image.open(current_fp)
         img_line = current_fp.split('IMG_')[1][:4] #get the current image line
-        img = np.asarray(Image.open(current_fp))
-        self.reset(_event)
         self.ax.set_title('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
-        self.im.set_extent((0,img.shape[1],0,img.shape[0]))
+        self.im.set_extent((0,img.shape[1],img.shape[0],0)) # left, right, bottom, top
+        
         self.im.set_data(img)
         self.im.figure.canvas.draw_idle()
         
@@ -201,27 +209,41 @@ class LineBuilder:
         self.img_counter = self.img_counter-1
         img_index = self.img_counter%self.n_img
         current_fp = self.rgb_fp[img_index] 
-        img_line = current_fp.split('IMG_')[1][:4] #get the current image line
-        img = np.asarray(Image.open(current_fp))
+
+        cap = import_captures(current_fp)
+        img = aligned_capture(cap)
+        
+        # img = np.asarray(Image.open(current_fp))
+        # img = Image.open(current_fp)
         self.reset(_event)
+        img_line = current_fp.split('IMG_')[1][:4] #get the current image line
         self.ax.set_title('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
-        self.im.set_extent((0,img.shape[1],0,img.shape[0]))
+        self.im.set_extent((0,img.shape[1],img.shape[0],0)) # left, right, bottom, top
+        
         self.im.set_data(img)
         self.im.figure.canvas.draw_idle()
 
-def draw_sunglint_correction(postfix,fp_store):
+def draw_sunglint_correction(fp_store):
     # initialise plot
     fig, ax = plt.subplots()
 
     # import files
     rgb_fp = [join(fp_store,f) for f in listdir(fp_store) if f.endswith("1.tif")]
-    print(rgb_fp)
-    img = Image.open(rgb_fp[0])
-    img_line = rgb_fp[0].split('IMG_')[1][:4]
-    print(img_line)
+
+    cap = import_captures(rgb_fp[0])
+    global warp_matrices
+    global cropped_dimensions
+    warp_matrices = cap.get_warp_matrices()
+    cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
+
+    img = aligned_capture(cap)
     im = ax.imshow(img)
 
+    # print(rgb_fp)
+    # img = Image.open(rgb_fp[0])
+
     # set title
+    img_line = rgb_fp[0].split('IMG_')[1][:4]
     ax.set_title('Select T, W, TG, WG, S areas\nImage Index {}'.format(img_line))
 
     # initialise categories
@@ -241,18 +263,7 @@ def draw_sunglint_correction(postfix,fp_store):
         dict_builder[button] = {'line':line_category,'patch':patch}
 
     # initialise LineBuilder
-    linebuilder = LineBuilder(dict_builder,fig,ax,im,rgb_fp,postfix)
-
-    # line_glint, = ax.plot(0,0,"o",c="r")
-    # line_nonglint, = ax.plot(0,0,"o",c="purple")
-    # # Create a Rectangle patch
-    # rect_glint = patches.Rectangle((0, 0), 10, 10, linewidth=1, edgecolor='r', facecolor='none')
-    # r_glint = ax.add_patch(rect_glint)
-
-    # rect_nonglint = patches.Rectangle((0, 0), 10, 10, linewidth=1, edgecolor='purple', facecolor='none')
-    # r_nonglint = ax.add_patch(rect_nonglint)
-
-    # linebuilder = LineBuilder(line_glint,line_nonglint,r_glint,r_nonglint,fig,ax,im,prefix,rgb_fp)
+    linebuilder = LineBuilder(dict_builder,fig,ax,im,rgb_fp)
 
     plt.subplots_adjust(bottom=0.2,right=0.8)
     #reset button
@@ -279,21 +290,12 @@ def draw_sunglint_correction(postfix,fp_store):
     buttons = [Button(a,name) for a,name in zip(axes,button_names)]
     for k,button in zip(button_names,buttons):
         button.on_clicked(getattr(linebuilder,k)) #update this
-    # #turbid glint areas
-    # glint_ax = plt.axes([0.82, 0.9, 0.1, 0.075]) #left,bottom, width, height
-    # glint = Button(glint_ax, 'turbid_glint')
-    # glint.on_clicked(linebuilder.glint)
-    # #water glint areas
-    # non_glint_ax = plt.axes([0.82, 0.8, 0.15, 0.075]) #left,bottom, width, height
-    # non_glint = Button(non_glint_ax, 'water_glint')
-    # non_glint.on_clicked(linebuilder.non_glint)
+    
     plt.show()
 
 
 if __name__ == '__main__':
-    # prefix = input("Enter prefix:")
     
     fp_store = input("Enter directory: ")#r"C:\Users\PAKHUIYING\Downloads\test" #r"C:\Users\PAKHUIYING\Documents\image_processing\F3_processed_surveys\2021_11_10_2"
     fp_store = fp_store.replace("\\","/").replace("\"","")
-    postfix = get_all_dir(fp_store,iter=3)
-    draw_sunglint_correction(postfix,fp_store)
+    draw_sunglint_correction(fp_store)

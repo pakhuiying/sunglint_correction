@@ -5,6 +5,9 @@ import micasense.imageutils as imageutils
 import micasense.plotutils as plotutils
 import cv2
 import matplotlib.pyplot as plt
+import PIL.Image as Image
+import matplotlib.patches as patches
+import json
 
 panel_radiance_to_irradiance = lambda radiance,albedo: radiance*np.pi/albedo
 
@@ -57,3 +60,40 @@ def get_rgb(im_aligned,plot=True):
         plt.show()
 
     return im_display
+
+def plot_bboxes(fp):
+    """ 
+    :param fp (str): filepath of txt file which contains the bboxes of turbid, water, turbid_glint, water_glint, shore
+    this function plot the bboxes of each category to validate the selection of bboxes with python GUI (get_training_data.py)
+    """
+    with open(fp, 'r') as fp:
+        data = json.load(fp)
+
+    # initialise categories
+    button_names = ['turbid_glint','water_glint','turbid','water','shore']
+    
+    # intialise colours
+    colors = ['orange','cyan','saddlebrown','blue','yellow']
+
+    # mapping of categories and colors
+    cat_colors = dict()
+    for cat,c in zip(button_names,colors):
+        cat_colors[cat] = c
+    
+    fig,ax = plt.subplots()
+    ax.imshow(Image.open(list(data)[0]))
+    for v in data.values():
+        for k1,v1 in v.items():
+            if v1 is not None:
+                ((x1,y1),(x2,y2)) = v1
+                if x1 > x2:
+                    x1, x2 = x2, x1
+                if y1 > y2:
+                    y1, y2 = y2, y1
+                h = y1 - y2 # negative height as the origin is on the top left
+                w = x2 - x1
+                # in patches, x,y coord is the bottom left corner, 
+                rect = patches.Rectangle((x1, y2), w, h, linewidth=1, edgecolor=cat_colors[k1], facecolor='none')
+                patch = ax.add_patch(rect)
+    plt.show()
+    return 
