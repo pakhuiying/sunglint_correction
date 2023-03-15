@@ -3,11 +3,13 @@ import os
 import pickle #This library will maintain the format as well
 import micasense.imageutils as imageutils
 import micasense.plotutils as plotutils
+import micasense.capture as capture
 import cv2
 import matplotlib.pyplot as plt
 import PIL.Image as Image
 import matplotlib.patches as patches
 import json
+import glob
 
 panel_radiance_to_irradiance = lambda radiance,albedo: radiance*np.pi/albedo
 
@@ -38,7 +40,7 @@ def align_captures(cap,img_type = "reflectance"):
     """
     warp_mode = cv2.MOTION_HOMOGRAPHY
     warp_matrices = cap.get_warp_matrices()
-    cropped_dimensions,edges = imageutils.find_crop_bounds(cap,warp_matrices)
+    cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
     im_aligned = imageutils.aligned_capture(cap, warp_matrices, warp_mode, cropped_dimensions, None, img_type=img_type)
     return im_aligned
 
@@ -59,6 +61,63 @@ def get_rgb(im_aligned,plot=True):
         plt.imshow(im_display)
         plt.show()
 
+    return im_display
+
+def import_captures(current_fp):
+    """
+    :param current_fp (str): filepath of micasense raw image IMG_****_1.tif
+    from current_fp, list all band images, and import capture object
+    """
+    basename = current_fp[:-6]
+    fn = glob.glob('{}_*.tif'.format(basename))
+    fn = order_bands_from_filenames(fn)
+    cap = capture.Capture.from_filelist(fn)
+    return cap
+
+def aligned_capture_rgb(capture, warp_matrices, cropped_dimensions, img_type = 'reflectance',interpolation_mode=cv2.INTER_LANCZOS4):
+    """ 
+    :param capture (capture object): for 10-bands image
+    :param warp_matrices (mxmx3 np.ndarray): in rgb order of [2,1,0] loaded from pickle
+    :param cropped_dimensions (tuple): loaded from pickle
+    align images using the warp_matrices used for aligning 10-band images and outputs an rgb image
+    """
+
+    warp_mode = cv2.MOTION_HOMOGRAPHY
+    
+    width, height = capture.images[0].size()
+
+    rgb_band_indices = [2,1,0]
+
+    im_aligned = np.zeros((height,width,len(rgb_band_indices)), dtype=np.float32 )
+
+    for i,rgb_i in enumerate(rgb_band_indices):
+        if img_type == 'reflectance':
+            img = capture.images[rgb_i].undistorted_reflectance()
+        else:
+            img = capture.images[rgb_i].undistorted_radiance()
+
+        if warp_mode != cv2.MOTION_HOMOGRAPHY:
+            im_aligned[:,:,i] = cv2.warpAffine(img,
+                                            warp_matrices[rgb_i],
+                                            (width,height),
+                                            flags=interpolation_mode + cv2.WARP_INVERSE_MAP)
+        else:
+            im_aligned[:,:,i] = cv2.warpPerspective(img,
+                                                warp_matrices[rgb_i],
+                                                (width,height),
+                                                flags=interpolation_mode + cv2.WARP_INVERSE_MAP)
+    (left, top, w, h) = tuple(int(i) for i in cropped_dimensions)
+    im_cropped = im_aligned[top:top+h, left:left+w][:]
+
+    # get normalised rgb image
+    im_min = np.percentile(im_cropped.flatten(),  0.1)  # modify with these percentilse to adjust contrast
+    im_max = np.percentile(im_cropped.flatten(), 99.9)  # for many images, 0.5 and 99.5 are good values
+
+    im_display = np.zeros((im_cropped.shape[0],im_cropped.shape[1],len(rgb_band_indices)), dtype=np.float32)
+    
+    for i in range(len(rgb_band_indices)):
+        im_display[:,:,i] = imageutils.normalize(im_cropped[:,:,i], im_min, im_max)
+    
     return im_display
 
 def plot_bboxes(fp):

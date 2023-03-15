@@ -22,16 +22,6 @@ def get_all_dir(fp,iter=3):
         fp_temp = base_fn
     return '_'.join(reversed(sub_dir_list))
 
-def import_captures(current_fp):
-    """
-    :param current_fp (str): filepath of micasense raw image IMG_****_1.tif
-    """
-    basename = current_fp[:-6]
-    fn = glob.glob('{}_*.tif'.format(basename))
-    fn = mutils.order_bands_from_filenames(fn)
-    cap = capture.Capture.from_filelist(fn)
-    return cap
-
 def aligned_capture(capture, img_type = 'reflectance',interpolation_mode=cv2.INTER_LANCZOS4):
     """ 
     :param capture (capture object): for 10-bands image
@@ -193,7 +183,7 @@ class LineBuilder:
         img_index = self.img_counter%self.n_img
         current_fp = self.rgb_fp[img_index]
 
-        cap = import_captures(current_fp)
+        cap = mutils.import_captures(current_fp)
         img = aligned_capture(cap)
         
         # img = np.asarray(Image.open(current_fp))
@@ -210,7 +200,7 @@ class LineBuilder:
         img_index = self.img_counter%self.n_img
         current_fp = self.rgb_fp[img_index] 
 
-        cap = import_captures(current_fp)
+        cap = mutils.import_captures(current_fp)
         img = aligned_capture(cap)
         
         # img = np.asarray(Image.open(current_fp))
@@ -230,7 +220,7 @@ def draw_sunglint_correction(fp_store):
     # import files
     rgb_fp = [join(fp_store,f) for f in listdir(fp_store) if f.endswith("1.tif")]
 
-    cap = import_captures(rgb_fp[0])
+    cap = mutils.import_captures(rgb_fp[0])
     global warp_matrices
     global cropped_dimensions
     warp_matrices = cap.get_warp_matrices()
