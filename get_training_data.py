@@ -68,11 +68,29 @@ def aligned_capture(capture, img_type = 'reflectance',interpolation_mode=cv2.INT
     
     return im_display
 
-
+def get_current_img_counter(dir):
+    """ 
+    list all the files in saved_bboxes to track which is the last processed image wrt to current dir
+    """
+    if exists("saved_bboxes"):
+        stored_fp = listdir("saved_bboxes") 
+        selected_fp = []
+        for fp in stored_fp:
+            if all([i in dir for i in fp.split('_')[:2]]):
+                selected_fp.append(fp)
+        if len(selected_fp) > 0:
+            selected_img = sorted(selected_fp)[-1]
+            img_line = selected_img.split('IMG_')[1][:4]
+            img_counter = int(img_line) + 1
+        else:
+            img_counter = 0
+    else:
+        img_counter = 0
+    return img_counter
 
 class LineBuilder:
     lock = "water"  # only one can be animated at a time
-    def __init__(self,dict_builder,fig,ax,im,rgb_fp):
+    def __init__(self,dict_builder,fig,ax,im,rgb_fp,img_counter):
         self.dict_builder = dict_builder
         self.categories = list(dict_builder)
         
@@ -89,8 +107,8 @@ class LineBuilder:
         self.im = im
         self.rgb_fp = rgb_fp
         self.n_img = len(rgb_fp)
-        self.img_counter = 0
-        self.current_fp = rgb_fp[0] # initialise with first fp
+        self.img_counter = img_counter
+        self.current_fp = rgb_fp[self.img_counter] # initialise with first fp
         
 
 
@@ -218,9 +236,11 @@ def draw_sunglint_correction(fp_store):
     fig, ax = plt.subplots()
 
     # import files
-    rgb_fp = [join(fp_store,f) for f in listdir(fp_store) if f.endswith("1.tif")]
+    rgb_fp = [join(fp_store,f) for f in sorted(listdir(fp_store)) if f.endswith("1.tif")]
+    # go to the last processed image
+    img_counter = get_current_img_counter(fp_store)
 
-    cap = mutils.import_captures(rgb_fp[0])
+    cap = mutils.import_captures(rgb_fp[img_counter])
     global warp_matrices
     global cropped_dimensions
     warp_matrices = cap.get_warp_matrices()
@@ -229,11 +249,10 @@ def draw_sunglint_correction(fp_store):
     img = aligned_capture(cap)
     im = ax.imshow(img)
 
-    # print(rgb_fp)
-    # img = Image.open(rgb_fp[0])
+    
 
     # set title
-    img_line = rgb_fp[0].split('IMG_')[1][:4]
+    img_line = rgb_fp[img_counter].split('IMG_')[1][:4]
     ax.set_title('Select T, W, TG, WG, S areas\nImage Index {}'.format(img_line))
 
     # initialise categories
@@ -253,7 +272,7 @@ def draw_sunglint_correction(fp_store):
         dict_builder[button] = {'line':line_category,'patch':patch}
 
     # initialise LineBuilder
-    linebuilder = LineBuilder(dict_builder,fig,ax,im,rgb_fp)
+    linebuilder = LineBuilder(dict_builder,fig,ax,im,rgb_fp,img_counter)
 
     plt.subplots_adjust(bottom=0.2,right=0.8)
     #reset button
