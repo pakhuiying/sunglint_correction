@@ -34,6 +34,12 @@ def load_pickle(fp):
         print("Not a pickle file")
         return None
 
+def sort_bands_by_wavelength():
+    """ import center_wavelengths_by_band.ob and sort"""
+    wavelengths = load_pickle(r"saved_data\center_wavelengths_by_band.ob")
+    wavelengths = [(i,w) for i,w in enumerate(wavelengths)]
+    return sorted(wavelengths,key=lambda x: x[1])
+
 def align_captures(cap,img_type = "reflectance"):
     """ 
     use rig relatives to align band images 
@@ -119,6 +125,19 @@ def aligned_capture_rgb(capture, warp_matrices, cropped_dimensions, img_type = '
         im_display[:,:,i] = imageutils.normalize(im_cropped[:,:,i], im_min, im_max)
     
     return im_display
+
+def bboxes_to_patches(bboxes):
+    if bboxes is not None:
+        ((x1,y1),(x2,y2)) = bboxes
+        if x1 > x2:
+            x1, x2 = x2, x1
+        if y1 > y2:
+            y1, y2 = y2, y1
+        h = y1 - y2 # negative height as the origin is on the top left
+        w = x2 - x1
+        return (x1,y2), w, h
+    else:
+        return None
 
 def plot_bboxes(fp):
     """ 
