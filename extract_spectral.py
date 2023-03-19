@@ -91,7 +91,10 @@ class ExtractSpectral:
                 current_fp = os.path.join(flight_fp,images_names[0])
                 warp_matrices, cropped_dimensions = self.get_warp_matrices(current_fp)
 
-                if n_images < show_n:
+                if show_n is None:
+                    fig, axes = plt.subplots(ceil(n_images/2),2)
+
+                elif n_images < show_n:
                     fig, axes = plt.subplots(ceil(n_images/2),2,figsize=figsize)
                 else:
                     fig, axes = plt.subplots(ceil(show_n/2),2,figsize=figsize)
@@ -109,6 +112,7 @@ class ExtractSpectral:
                         rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor=self.color_mapping[categories], facecolor='none')
                         patch = ax.add_patch(rect)
                 fig.suptitle(flight_fp)
+                plt.tight_layout()
                 plt.show()
     
     def get_multispectral_bboxes(self,parent_dir,img_fp,img_bboxes=None,warp_matrices=None, cropped_dimensions=None):
