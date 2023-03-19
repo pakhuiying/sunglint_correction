@@ -1,0 +1,1 @@
+{"F:/surveys_10band/10thSur24Aug/F1/RawImg\\IMG_0009_1.tif": {"turbid_glint": null, "water_glint": [[42, 746], [178, 874]], "turbid": null, "water": [[672, 233], [834, 374]], "shore": null}}

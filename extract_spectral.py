@@ -275,10 +275,7 @@ class ExtractSpectral:
             'rgb' means that all rgb bands will be used to detect glint
             'nir' means that only nir band is only used to detect glint
         TODO 
-            1. use a horizontal line across the original and corrected image to show the location of where spectrum is drawn
-            2. add spectrum of the horizontal line
-            3. use cv.INPAINT_NS or CV.INPAINT_TELEA method for inpainting
-            4. automate finding the percentile_threshold using CDF method
+            1. automate finding the percentile_threshold using CDF method
         """
         ((x1,y1),(x2,y2)) = bbox
         if x1 > x2:
