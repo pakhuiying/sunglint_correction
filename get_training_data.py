@@ -149,6 +149,7 @@ class LineBuilder:
         for k in self.categories:
             setattr(self, k+'_x', [])
             setattr(self, k+'_y', [])
+            setattr(self, k+'_bbox', None)
             x1 = y1 = h = w = 0
             getattr(self,k+'_line').set_data([],[])
             getattr(self,k+'_patch').set_xy((x1,y1))
@@ -185,18 +186,29 @@ class LineBuilder:
         if not exists(store_dir):
             mkdir(store_dir)
 
+        #create a new dir to store plot images
+        plot_dir = join(getcwd(),"saved_plots")
+        if not exists(plot_dir):
+            mkdir(plot_dir)
+
         fp_store = join(store_dir,fn)
         fp_store = fp_store.replace('.tif','')
         print(f"File saved at {fp_store}!")
+
+        fp_plot = join(plot_dir,fn)
+        fp_plot = fp_plot.replace('.tif','')
+        print(f"File saved at {fp_plot}!")
         
         with open('{}.txt'.format(fp_store),'w') as cf:
             json.dump(save_bboxes,cf)
         
+        # save plt
+        plt.savefig('{}.png'.format(fp_plot))
 
     def next(self, _event):
+        
+        self.save(_event) # save previous data first then reset
         self.reset(_event)
-        self.save(_event)
-
         self.img_counter = self.img_counter+1
         img_index = self.img_counter%self.n_img
         current_fp = self.rgb_fp[img_index]
