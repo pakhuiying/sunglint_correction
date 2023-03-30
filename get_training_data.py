@@ -27,7 +27,7 @@ def aligned_capture(capture, img_type = 'reflectance',interpolation_mode=cv2.INT
     :param capture (capture object): for 10-bands image
     :param warp_matrices (mxmx3 np.ndarray): in rgb order of [2,1,0] loaded from pickle
     :param cropped_dimensions (tuple): loaded from pickle
-    align images using the warp_matrices used for aligning 10-band images and outputs an rgb image
+    align images using the warp_matrices used for aligning 10-band images and outputs a tuple (rgb image, normalised rgb image)
     """
 
     warp_mode = cv2.MOTION_HOMOGRAPHY
@@ -66,7 +66,7 @@ def aligned_capture(capture, img_type = 'reflectance',interpolation_mode=cv2.INT
     for i in range(len(rgb_band_indices)):
         im_display[:,:,i] = imageutils.normalize(im_cropped[:,:,i], im_min, im_max)
     
-    return im_display
+    return np.take(im_cropped,rgb_band_indices,axis=2), im_display # rgb image, normalised rgb image
 
 def get_current_img_counter(dir):
     """ 
@@ -90,7 +90,16 @@ def get_current_img_counter(dir):
 
 class LineBuilder:
     lock = "water"  # only one can be animated at a time
-    def __init__(self,dict_builder,fig,ax,im,rgb_fp,img_counter):
+    def __init__(self,dict_builder,fig,axes,im,im_norm,rgb_fp,img_counter):
+        """
+        :param dict_builder (dict): use it to save bboxes for different categories
+        :param fig (mpl figure object)
+        :param axes (mpl Axes object)
+        :param im (imshow object): that plots true rgb color
+        :param imnorm (imshow object): that plots normalised rgb color
+        :param rgb_fp (list of str): list of filepaths
+        :param img_counter (int): to keep track of the image counter/img line
+        """
         self.dict_builder = dict_builder
         self.categories = list(dict_builder)
         
@@ -103,13 +112,14 @@ class LineBuilder:
 
         # self.cid = fig.canvas.mpl_connect('button_press_event', self)
         self.cid = fig.canvas.mpl_connect('button_press_event', self)
-        self.ax = ax
+        self.fig = fig
+        self.axes = axes
         self.im = im
+        self.im_norm = im_norm
         self.rgb_fp = rgb_fp
         self.n_img = len(rgb_fp)
         self.img_counter = img_counter
         self.current_fp = rgb_fp[self.img_counter] # initialise with first fp
-        
 
 
     def __call__(self, event):
@@ -145,7 +155,7 @@ class LineBuilder:
         
 
     def reset(self, _event):
-        """clear all points, lines and patches"""
+        """clear all points, lines and patches. TODO has a bug in reset because it clears the last saved image's bbox and plot"""
         for k in self.categories:
             setattr(self, k+'_x', [])
             setattr(self, k+'_y', [])
@@ -178,7 +188,7 @@ class LineBuilder:
         print(save_bboxes)
         print(self.current_fp)
         # get unique filename from current_fp
-        fn = get_all_dir(self.current_fp,iter=4)
+        fn = get_all_dir(self.current_fp,iter=2)
         
 
         #create a new dir to store bboxes
@@ -203,7 +213,7 @@ class LineBuilder:
             json.dump(save_bboxes,cf)
         
         # save plt
-        plt.savefig('{}.png'.format(fp_plot))
+        self.fig.savefig('{}.png'.format(fp_plot))
 
     def next(self, _event):
         
@@ -214,38 +224,48 @@ class LineBuilder:
         current_fp = self.rgb_fp[img_index]
 
         cap = mutils.import_captures(current_fp)
-        img = aligned_capture(cap)
+        img, img_norm = aligned_capture(cap)
         
         # img = np.asarray(Image.open(current_fp))
         # img = Image.open(current_fp)
         img_line = current_fp.split('IMG_')[1][:4] #get the current image line
-        self.ax.set_title('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
+        # self.ax.set_title('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
+        self.fig.suptitle('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
+
         self.im.set_extent((0,img.shape[1],img.shape[0],0)) # left, right, bottom, top
-        
         self.im.set_data(img)
         self.im.figure.canvas.draw_idle()
+
+        self.im_norm.set_extent((0,img_norm.shape[1],img_norm.shape[0],0)) # left, right, bottom, top
+        self.im_norm.set_data(img_norm)
+        self.im_norm.figure.canvas.draw_idle()
         
     def previous(self,_event):
         self.img_counter = self.img_counter-1
         img_index = self.img_counter%self.n_img
-        current_fp = self.rgb_fp[img_index] 
+        current_fp = self.rgb_fp[img_index]
 
         cap = mutils.import_captures(current_fp)
-        img = aligned_capture(cap)
+        img, img_norm = aligned_capture(cap)
         
         # img = np.asarray(Image.open(current_fp))
         # img = Image.open(current_fp)
         self.reset(_event)
         img_line = current_fp.split('IMG_')[1][:4] #get the current image line
-        self.ax.set_title('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
+        # self.ax.set_title('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
+        self.fig.suptitle('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
+
         self.im.set_extent((0,img.shape[1],img.shape[0],0)) # left, right, bottom, top
-        
         self.im.set_data(img)
         self.im.figure.canvas.draw_idle()
 
+        self.im_norm.set_extent((0,img_norm.shape[1],img_norm.shape[0],0)) # left, right, bottom, top
+        self.im_norm.set_data(img_norm)
+        self.im_norm.figure.canvas.draw_idle()
+
 def draw_sunglint_correction(fp_store):
     # initialise plot
-    fig, ax = plt.subplots()
+    fig, axes = plt.subplots(1,2)
 
     # import files
     rgb_fp = [join(fp_store,f) for f in sorted(listdir(fp_store)) if f.endswith("1.tif")]
@@ -258,14 +278,16 @@ def draw_sunglint_correction(fp_store):
     warp_matrices = cap.get_warp_matrices()
     cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
 
-    img = aligned_capture(cap)
-    im = ax.imshow(img)
-
+    img, img_norm = aligned_capture(cap)
+    im = axes[0].imshow(img)
+    im_norm = axes[1].imshow(img_norm)
+    axes[0].set_title('True RGB')
+    axes[1].set_title('Normalised RGB')
     
 
     # set title
     img_line = rgb_fp[img_counter].split('IMG_')[1][:4]
-    ax.set_title('Select T, W, TG, WG, S areas\nImage Index {}'.format(img_line))
+    fig.suptitle('Select T, W, TG, WG, S areas\nImage Index {}'.format(img_line))
 
     # initialise categories
     button_names = ['turbid_glint','water_glint','turbid','water','shore']
@@ -278,13 +300,13 @@ def draw_sunglint_correction(fp_store):
     
     # add to plot
     for button,c in zip(button_names,colors):
-        line_category, = ax.plot(0,0,"o",c=c)
+        line_category, = axes[1].plot(0,0,"o",c=c)
         rect = patches.Rectangle((0, 0), 10, 10, linewidth=1, edgecolor=c, facecolor='none')
-        patch = ax.add_patch(rect)
+        patch = axes[1].add_patch(rect)
         dict_builder[button] = {'line':line_category,'patch':patch}
 
     # initialise LineBuilder
-    linebuilder = LineBuilder(dict_builder,fig,ax,im,rgb_fp,img_counter)
+    linebuilder = LineBuilder(dict_builder,fig,axes,im,im_norm,rgb_fp,img_counter)
 
     plt.subplots_adjust(bottom=0.2,right=0.8)
     #reset button
@@ -307,8 +329,8 @@ def draw_sunglint_correction(fp_store):
     # buttons to select region
     
     
-    axes = [plt.axes([0.82, 0.8-i/10, 0.15, 0.075]) for i in range(len(button_names))]
-    buttons = [Button(a,name) for a,name in zip(axes,button_names)]
+    axes_buttons = [plt.axes([0.82, 0.8-i/10, 0.15, 0.075]) for i in range(len(button_names))]
+    buttons = [Button(a,name) for a,name in zip(axes_buttons,button_names)]
     for k,button in zip(button_names,buttons):
         button.on_clicked(getattr(linebuilder,k)) #update this
     
