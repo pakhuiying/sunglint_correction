@@ -1,5 +1,5 @@
 from matplotlib import pyplot as plt
-from matplotlib.widgets import Button
+from matplotlib.widgets import Button, TextBox
 import matplotlib.patches as patches
 import PIL.Image as Image
 import json
@@ -118,44 +118,54 @@ class LineBuilder:
         self.im_norm = im_norm
         self.rgb_fp = rgb_fp
         self.n_img = len(rgb_fp)
+        # keep track of current img counter
         self.img_counter = img_counter
-        self.current_fp = rgb_fp[self.img_counter] # initialise with first fp
-
+        self.current_fp = rgb_fp[self.img_counter]
+        # keep track of saved img counter, only keep track when bboxes are drawn
+        self.save_counter = img_counter
 
     def __call__(self, event):
         if any([event.inaxes != getattr(self,k+'_line').axes for k in self.categories]) is True:
             print("No call")
             return
         
-        k = LineBuilder.lock
-        getattr(self,k+'_x').append(event.xdata)
-        getattr(self,k+'_y').append(event.ydata)
-        xs = getattr(self,k+'_x')[-2:]
-        ys = getattr(self,k+'_y')[-2:]
-        print(xs,ys)
-        getattr(self,k+'_line').set_data(xs,ys)
-        getattr(self,k+'_line').figure.canvas.draw_idle()
-        self.draw_rect(event)
+        else:
+            k = LineBuilder.lock
+            getattr(self,k+'_x').append(event.xdata)
+            getattr(self,k+'_y').append(event.ydata)
+            xs = getattr(self,k+'_x')[-2:]
+            ys = getattr(self,k+'_y')[-2:]
+            print(xs,ys)
+            getattr(self,k+'_line').set_data(xs,ys)
+            getattr(self,k+'_line').figure.canvas.draw_idle()
+            self.draw_rect(event)
         
 
     def draw_rect(self, _event):
-        img_index = self.img_counter%self.n_img
-        current_fp = self.rgb_fp[img_index] 
+        # img_index = self.img_counter%self.n_img
+        # current_fp = self.rgb_fp[img_index] 
+        # self.current_fp = current_fp
 
+        # get current bbox
         k = LineBuilder.lock
         x1,x2 = getattr(self,k+'_x')[-2:]
         y1,y2 = getattr(self,k+'_y')[-2:]
         setattr(self, k+'_bbox', ((int(x1),int(y1)),(int(x2),int(y2))))
+
+        # draw
         h = y2 - y1
         w = x2 - x1
         getattr(self,k+'_patch').set_xy((x1,y1))
         getattr(self,k+'_patch').set_height(h)
         getattr(self,k+'_patch').set_width(w)
-        self.current_fp = current_fp
+        
+        # keep track of save counter when drawing bboxes
+        self.save_counter = self.img_counter%self.n_img
         
 
     def reset(self, _event):
         """clear all points, lines and patches. TODO has a bug in reset because it clears the last saved image's bbox and plot"""
+        self.save_counter = self.img_counter
         for k in self.categories:
             setattr(self, k+'_x', [])
             setattr(self, k+'_y', [])
@@ -184,51 +194,55 @@ class LineBuilder:
     
     def save(self, _event):
         
-        save_bboxes = {self.current_fp:{k: getattr(self,k+'_bbox') for k in self.categories}}
-        print(save_bboxes)
-        print(self.current_fp)
-        # get unique filename from current_fp
-        fn = get_all_dir(self.current_fp,iter=2)
+        # save the last drawn bbox's fp
+        save_fp = self.rgb_fp[self.save_counter] #if bbox is drawn, there is definitely a save counter
+        save_bboxes = {save_fp:{k: getattr(self,k+'_bbox') for k in self.categories}}
         
+        # save if bboxes is not all None
+        if len([i for i in save_bboxes[list(save_bboxes)[0]].values() if i is not None]) > 0:
+            # print(save_bboxes)
+            print(f'IMG_index: {self.save_counter}\nFilename: {save_fp}')
+            # get unique filename from current_fp
+            fn = get_all_dir(save_fp,iter=3)
 
-        #create a new dir to store bboxes
-        store_dir = join(getcwd(),"saved_bboxes")
-        if not exists(store_dir):
-            mkdir(store_dir)
+            #create a new dir to store bboxes
+            store_dir = join(getcwd(),"saved_bboxes")
+            if not exists(store_dir):
+                mkdir(store_dir)
 
-        #create a new dir to store plot images
-        plot_dir = join(getcwd(),"saved_plots")
-        if not exists(plot_dir):
-            mkdir(plot_dir)
+            #create a new dir to store plot images
+            plot_dir = join(getcwd(),"saved_plots")
+            if not exists(plot_dir):
+                mkdir(plot_dir)
 
-        fp_store = join(store_dir,fn)
-        fp_store = fp_store.replace('.tif','')
-        print(f"File saved at {fp_store}!")
+            fp_store = join(store_dir,fn)
+            fp_store = fp_store.replace('.tif','')
+            print(f"File saved at {fp_store}!")
 
-        fp_plot = join(plot_dir,fn)
-        fp_plot = fp_plot.replace('.tif','')
-        print(f"File saved at {fp_plot}!")
-        
-        with open('{}.txt'.format(fp_store),'w') as cf:
-            json.dump(save_bboxes,cf)
-        
-        # save plt
-        self.fig.savefig('{}.png'.format(fp_plot))
+            fp_plot = join(plot_dir,fn)
+            fp_plot = fp_plot.replace('.tif','')
+            print(f"File saved at {fp_plot}!")
+            
+            with open('{}.txt'.format(fp_store),'w') as cf:
+                json.dump(save_bboxes,cf)
+            
+            # save plt
+            self.fig.savefig('{}.png'.format(fp_plot))
 
     def next(self, _event):
         
         self.save(_event) # save previous data first then reset
-        self.reset(_event)
+        self.reset(_event) # clear all bboxes
         self.img_counter = self.img_counter+1
         img_index = self.img_counter%self.n_img
-        current_fp = self.rgb_fp[img_index]
+        self.current_fp = self.rgb_fp[img_index] #update fp with current img counter
 
-        cap = mutils.import_captures(current_fp)
+        cap = mutils.import_captures(self.current_fp)
         img, img_norm = aligned_capture(cap)
         
         # img = np.asarray(Image.open(current_fp))
         # img = Image.open(current_fp)
-        img_line = current_fp.split('IMG_')[1][:4] #get the current image line
+        img_line = self.current_fp.split('IMG_')[1][:4] #get the current image line
         # self.ax.set_title('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
         self.fig.suptitle('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
 
@@ -243,15 +257,15 @@ class LineBuilder:
     def previous(self,_event):
         self.img_counter = self.img_counter-1
         img_index = self.img_counter%self.n_img
-        current_fp = self.rgb_fp[img_index]
+        self.current_fp = self.rgb_fp[img_index]
 
-        cap = mutils.import_captures(current_fp)
+        cap = mutils.import_captures(self.current_fp)
         img, img_norm = aligned_capture(cap)
         
-        # img = np.asarray(Image.open(current_fp))
-        # img = Image.open(current_fp)
+        # img = np.asarray(Image.open(self.current_fp))
+        # img = Image.open(self.current_fp)
         self.reset(_event)
-        img_line = current_fp.split('IMG_')[1][:4] #get the current image line
+        img_line = self.current_fp.split('IMG_')[1][:4] #get the current image line
         # self.ax.set_title('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
         self.fig.suptitle('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
 
@@ -262,10 +276,46 @@ class LineBuilder:
         self.im_norm.set_extent((0,img_norm.shape[1],img_norm.shape[0],0)) # left, right, bottom, top
         self.im_norm.set_data(img_norm)
         self.im_norm.figure.canvas.draw_idle()
+    
+    def submit(self,_expression):
+        """
+        allows user to jump directly to an image index
+        """
+        img_index = int(_expression)
+        # evaluate expression and update image index
+        self.img_counter = img_index%self.n_img
+        self.current_fp = self.rgb_fp[self.img_counter]
+
+        # update images
+        cap = mutils.import_captures(self.current_fp)
+        img, img_norm = aligned_capture(cap)
+
+        img_line = self.current_fp.split('IMG_')[1][:4] #get the current image line
+        self.fig.suptitle('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
+
+        self.im.set_extent((0,img.shape[1],img.shape[0],0)) # left, right, bottom, top
+        self.im.set_data(img)
+        self.im.figure.canvas.draw_idle()
+
+        self.im_norm.set_extent((0,img_norm.shape[1],img_norm.shape[0],0)) # left, right, bottom, top
+        self.im_norm.set_data(img_norm)
+        self.im_norm.figure.canvas.draw_idle()
+
+        # clear all bboxes
+        for k in self.categories:
+            setattr(self, k+'_x', [])
+            setattr(self, k+'_y', [])
+            setattr(self, k+'_bbox', None)
+            x1 = y1 = h = w = 0
+            getattr(self,k+'_line').set_data([],[])
+            getattr(self,k+'_patch').set_xy((x1,y1))
+            getattr(self,k+'_patch').set_height(h)
+            getattr(self,k+'_patch').set_width(w)
+            getattr(self,k+'_line').figure.canvas.draw_idle()
 
 def draw_sunglint_correction(fp_store):
     # initialise plot
-    fig, axes = plt.subplots(1,2)
+    fig, axes = plt.subplots(1,2,figsize=(15,8))
 
     # import files
     rgb_fp = [join(fp_store,f) for f in sorted(listdir(fp_store)) if f.endswith("1.tif")]
@@ -283,6 +333,8 @@ def draw_sunglint_correction(fp_store):
     im_norm = axes[1].imshow(img_norm)
     axes[0].set_title('True RGB')
     axes[1].set_title('Normalised RGB')
+    for ax in axes:
+        ax.axis('off')
     
 
     # set title
@@ -327,13 +379,16 @@ def draw_sunglint_correction(fp_store):
     save = Button(save_ax, 'Save')
     save.on_clicked(linebuilder.save)
     # buttons to select region
-    
-    
     axes_buttons = [plt.axes([0.82, 0.8-i/10, 0.15, 0.075]) for i in range(len(button_names))]
     buttons = [Button(a,name) for a,name in zip(axes_buttons,button_names)]
     for k,button in zip(button_names,buttons):
-        button.on_clicked(getattr(linebuilder,k)) #update this
-    
+        button.on_clicked(getattr(linebuilder,k)) 
+    # add text box
+    textbox_ax = plt.axes([0.2, 0.15, 0.3, 0.075])
+    text_box = TextBox(textbox_ax, "IMG_index", textalignment="center")
+    text_box.on_submit(linebuilder.submit)
+    text_box.set_val(f"{img_counter}")
+
     plt.show()
 
 
