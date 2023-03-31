@@ -66,7 +66,7 @@ def aligned_capture(capture, img_type = 'reflectance',interpolation_mode=cv2.INT
     for i in range(len(rgb_band_indices)):
         im_display[:,:,i] = imageutils.normalize(im_cropped[:,:,i], im_min, im_max)
     
-    return np.take(im_cropped,rgb_band_indices,axis=2), im_display # rgb image, normalised rgb image
+    return im_cropped, im_display # rgb image, normalised rgb image
 
 def get_current_img_counter(dir):
     """ 
