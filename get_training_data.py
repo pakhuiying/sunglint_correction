@@ -164,7 +164,7 @@ class LineBuilder:
         
 
     def reset(self, _event):
-        """clear all points, lines and patches. TODO has a bug in reset because it clears the last saved image's bbox and plot"""
+        """clear all points, lines and patches."""
         self.save_counter = self.img_counter
         for k in self.categories:
             setattr(self, k+'_x', [])
