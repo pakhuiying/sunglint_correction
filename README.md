@@ -1,4 +1,6 @@
-# sunglint_correction
+[![Lifecycle:Experimental](https://img.shields.io/badge/Lifecycle-Experimental-339999)
+
+# Get training data for sunglint_correction
 
 1. cd to directory where the folder is cloned/downloaded
 
@@ -41,8 +43,8 @@ Buttons on the right helps in toggling the mode of selection (drawing bboxes)
 
 The colored boxes each correspond to the different categories. Here is an example on how to label the images:
 
-![gui1](example_images/gui1.png)
+![gui1](example_images/gui3.png)
 
-![gui2](example_images/gui2.png)
+![gui2](example_images/gui4.png)
 
 Read `SOP_identify_glint.pdf` for more information on using `get_training_data.py`

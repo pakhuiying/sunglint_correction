@@ -203,7 +203,7 @@ class LineBuilder:
             # print(save_bboxes)
             print(f'IMG_index: {self.save_counter}\nFilename: {save_fp}')
             # get unique filename from current_fp
-            fn = get_all_dir(save_fp,iter=3)
+            fn = get_all_dir(save_fp,iter=4)
 
             #create a new dir to store bboxes
             store_dir = join(getcwd(),"saved_bboxes")
