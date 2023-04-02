@@ -196,11 +196,17 @@ class ExtractSpectral:
         fig = plt.figure(figsize=(6, 2*(1+n_cats)), layout="constrained")
         spec = fig.add_gridspec(1+n_cats, 2) #first row is for the image
         # plot rgb
-        rgb_image = mutils.get_rgb(im_aligned,plot=False)
-        ax0 = fig.add_subplot(spec[0, :])
+        rgb_image = mutils.get_rgb(im_aligned, normalisation = False, plot=False)
+        ax0 = fig.add_subplot(spec[0, 0])
         ax0.imshow(rgb_image)
-        ax0.set_title('Image')
+        ax0.set_title('True RGB')
         ax0.set_axis_off()
+        # plot normalised rgb
+        rgb_image = mutils.get_rgb(im_aligned, normalisation = True, plot=False)
+        ax1 = fig.add_subplot(spec[0, 1])
+        ax1.imshow(rgb_image)
+        ax1.set_title('Normalised RGB')
+        ax1.set_axis_off()
 
         for i, (category,bbox) in enumerate(bboxes.items()):
             ((x1,y1),(x2,y2)) = bbox

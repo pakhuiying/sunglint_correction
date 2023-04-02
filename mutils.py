@@ -10,6 +10,7 @@ import PIL.Image as Image
 import matplotlib.patches as patches
 import json
 import glob
+import shutil
 
 panel_radiance_to_irradiance = lambda radiance,albedo: radiance*np.pi/albedo
 
@@ -50,17 +51,25 @@ def align_captures(cap,img_type = "reflectance"):
     im_aligned = imageutils.aligned_capture(cap, warp_matrices, warp_mode, cropped_dimensions, None, img_type=img_type)
     return im_aligned
 
-def get_rgb(im_aligned,plot=True):
+def get_rgb(im_aligned, normalisation = True, plot=True):
     """
-    :param im_aligned (np.ndarray): (m,n,c), where c = 10. output from align_captures
+    get rgb image from multispectral imae
+    :param im_aligned (np.ndarray): multispectral image of dims (m,n,c), where c = 10. output from align_captures
+    :param normalisation (bool): whether to normalise the rgb image for better contrast or not
+    :param plot (bool): whether to plot the images or not
     """
     rgb_band_indices = [2,1,0]
-    im_min = np.percentile(im_aligned[:,:,0:2].flatten(),  0.1)  # modify with these percentilse to adjust contrast
-    im_max = np.percentile(im_aligned[:,:,0:2].flatten(), 99.9)  # for many images, 0.5 and 99.5 are good values
 
-    im_display = np.zeros((im_aligned.shape[0],im_aligned.shape[1],len(rgb_band_indices)), dtype=np.float32)
-    for i,rgb_i in enumerate(rgb_band_indices):
-        im_display[:,:,i] = imageutils.normalize(im_aligned[:,:,rgb_i], im_min, im_max)
+    if normalisation is True:
+        im_min = np.percentile(im_aligned[:,:,0:2].flatten(),  0.1)  # modify with these percentilse to adjust contrast
+        im_max = np.percentile(im_aligned[:,:,0:2].flatten(), 99.9)  # for many images, 0.5 and 99.5 are good values
+
+        im_display = np.zeros((im_aligned.shape[0],im_aligned.shape[1],len(rgb_band_indices)), dtype=np.float32)
+        for i,rgb_i in enumerate(rgb_band_indices):
+            im_display[:,:,i] = imageutils.normalize(im_aligned[:,:,rgb_i], im_min, im_max)
+
+    else:
+        im_display = np.take(im_aligned,rgb_band_indices,axis=2)
 
     if plot is True:
         plt.figure(figsize=(10,10))
@@ -68,6 +77,8 @@ def get_rgb(im_aligned,plot=True):
         plt.show()
 
     return im_display
+    
+
 
 def import_captures(current_fp):
     """
@@ -188,3 +199,24 @@ def get_all_dir(fp,iter=3):
         sub_dir_list.append(fn)
         fp_temp = base_fn
     return '_'.join(reversed(sub_dir_list))
+
+def get_saved_bboxes_complement():
+    """
+    iterate through all the saved_bboxes files and check if there is a corresponding saved_plots file, if not, return the saved_bboxes file
+    """
+    store_dir = os.path.join(os.getcwd(),"saved_bboxes_complement")
+    if not os.path.exists(store_dir):
+        os.mkdir(store_dir)
+
+    saved_bboxes_complement = []
+    for i in sorted(os.listdir(r"saved_bboxes")):
+        saved_plots_dir = r"saved_plots"
+        fn = i.replace('.txt','.png')
+        saved_plots_fn = os.path.join(saved_plots_dir,fn)
+        if not os.path.exists(saved_plots_fn):
+            c_fn = os.path.join(r"saved_bboxes",i)
+            saved_bboxes_complement.append(c_fn)
+            c_fn_copy = os.path.join(store_dir,i)
+            shutil.copyfile(c_fn, c_fn_copy)
+    
+    return saved_bboxes_complement

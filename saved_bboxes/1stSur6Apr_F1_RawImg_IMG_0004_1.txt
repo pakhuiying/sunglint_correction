@@ -1,0 +1,1 @@
+{"D:/EPMC_flight/1stSur6Apr/F1/RawImg\\IMG_0004_1.tif": {"turbid_glint": null, "water_glint": [[19, 168], [124, 254]], "turbid": null, "water": [[603, 93], [635, 125]], "shore": [[393, 394], [544, 529]]}}
