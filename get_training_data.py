@@ -244,7 +244,7 @@ class LineBuilder:
         # img = Image.open(current_fp)
         img_line = self.current_fp.split('IMG_')[1][:4] #get the current image line
         # self.ax.set_title('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
-        self.fig.suptitle('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
+        self.fig.suptitle('Select T,W,TG, WG, S areas\n{}\nImage Index {}'.format(self.current_fp,img_line))
 
         self.im.set_extent((0,img.shape[1],img.shape[0],0)) # left, right, bottom, top
         self.im.set_data(img)
@@ -267,7 +267,7 @@ class LineBuilder:
         self.reset(_event)
         img_line = self.current_fp.split('IMG_')[1][:4] #get the current image line
         # self.ax.set_title('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
-        self.fig.suptitle('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
+        self.fig.suptitle('Select T,W,TG, WG, S areas\n{}\nImage Index {}'.format(self.current_fp,img_line))
 
         self.im.set_extent((0,img.shape[1],img.shape[0],0)) # left, right, bottom, top
         self.im.set_data(img)
@@ -291,7 +291,7 @@ class LineBuilder:
         img, img_norm = aligned_capture(cap)
 
         img_line = self.current_fp.split('IMG_')[1][:4] #get the current image line
-        self.fig.suptitle('Select T,W,TG, WG, S areas\nImage Index {}'.format(img_line))
+        self.fig.suptitle('Select T,W,TG, WG, S areas\n{}\nImage Index {}'.format(self.current_fp,img_line))
 
         self.im.set_extent((0,img.shape[1],img.shape[0],0)) # left, right, bottom, top
         self.im.set_data(img)
@@ -339,7 +339,7 @@ def draw_sunglint_correction(fp_store):
 
     # set title
     img_line = rgb_fp[img_counter].split('IMG_')[1][:4]
-    fig.suptitle('Select T, W, TG, WG, S areas\nImage Index {}'.format(img_line))
+    fig.suptitle('Select T,W,TG, WG, S areas\n{}\nImage Index {}'.format(rgb_fp[img_counter],img_line))
 
     # initialise categories
     button_names = ['turbid_glint','water_glint','turbid','water','shore']
