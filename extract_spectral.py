@@ -16,6 +16,7 @@ import radiometric_calib_utils as rcu
 import mutils
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib.lines import Line2D
 from matplotlib.collections import LineCollection
 import numpy as np
 from math import ceil
@@ -76,44 +77,86 @@ class ExtractSpectral:
         cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
         return warp_matrices, cropped_dimensions
 
-    def plot_bboxes(self,show_n = 6,figsize=(8,20)):
+    def plot_bboxes(self,show_n = 6,figsize=(8,20),save = False):
         """ 
         :param dir (str): directory of where all the bboxes (.txt) are stored i.e. saved_bboxes/
         :param show_n (int): show how many plots. if number of images exceeds show_n, plot only show_n
-        plots bboxes for greyscale images only
+        :param save (bool): save individual images if save is True
         """
         store_dict = self.store_bboxes()
+        # add legends
+        colors = ['orange','cyan','saddlebrown','blue','yellow']
+        lines = [Line2D([0], [0], color=c, linewidth=3, linestyle='-') for c in colors]
+        labels = ['turbid_glint','water_glint','turbid','water','shore']
 
-        for flight_fp, img_dict in store_dict.items():
-            images_names = list(img_dict)
-            n_images = len(images_names)
-            if n_images > 0:
-                current_fp = os.path.join(flight_fp,images_names[0])
-                warp_matrices, cropped_dimensions = self.get_warp_matrices(current_fp)
+        if save is False:
+            for flight_fp, img_dict in store_dict.items():
+                images_names = list(img_dict)
+                n_images = len(images_names)
+                if n_images > 0:
+                    current_fp = os.path.join(flight_fp,images_names[0])
+                    warp_matrices, cropped_dimensions = self.get_warp_matrices(current_fp)
 
-                if show_n is None:
-                    fig, axes = plt.subplots(ceil(n_images/2),2)
+                    if show_n is None:
+                        fig, axes = plt.subplots(ceil(n_images/2),2)
 
-                elif n_images < show_n:
-                    fig, axes = plt.subplots(ceil(n_images/2),2,figsize=figsize)
-                else:
-                    fig, axes = plt.subplots(ceil(show_n/2),2,figsize=figsize)
-                    img_dict = {i:img_dict[i] for i in list(images_names)[:show_n]}
-                
-                for (image_name,bboxes),ax in zip(img_dict.items(),axes.flatten()):
-                    current_fp = os.path.join(flight_fp,image_name)
-                    cap = mutils.import_captures(current_fp)
-                    rgb_image = mutils.aligned_capture_rgb(cap, warp_matrices, cropped_dimensions)
-                    ax.imshow(rgb_image)
-                    ax.set_title(image_name)
-                    ax.axis('off')
-                    for categories, bbox in bboxes.items():
-                        coord, w, h = mutils.bboxes_to_patches(bbox)
-                        rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor=self.color_mapping[categories], facecolor='none')
-                        patch = ax.add_patch(rect)
-                fig.suptitle(flight_fp)
-                plt.tight_layout()
-                plt.show()
+                    elif n_images < show_n:
+                        fig, axes = plt.subplots(ceil(n_images/2),2,figsize=figsize)
+                    else:
+                        fig, axes = plt.subplots(ceil(show_n/2),2,figsize=figsize)
+                        img_dict = {i:img_dict[i] for i in list(images_names)[:show_n]}
+                    
+                    for (image_name,bboxes),ax in zip(img_dict.items(),axes.flatten()):
+                        current_fp = os.path.join(flight_fp,image_name)
+                        cap = mutils.import_captures(current_fp)
+                        rgb_image = mutils.aligned_capture_rgb(cap, warp_matrices, cropped_dimensions, normalisation=True)
+                        ax.imshow(rgb_image)
+                        ax.set_title(image_name)
+                        ax.axis('off')
+                        for categories, bbox in bboxes.items():
+                            coord, w, h = mutils.bboxes_to_patches(bbox)
+                            rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor=self.color_mapping[categories], facecolor='none')
+                            patch = ax.add_patch(rect)
+                    
+                    fig.suptitle(flight_fp)
+                    plt.legend(lines,labels,loc='center left',bbox_to_anchor=(1.04, 0.5))
+                    plt.tight_layout()
+                    plt.show()
+        
+        else:
+            #create a new dir to store plot images
+            plot_dir = os.path.join(os.getcwd(),"QAQC_plots")
+            if not os.path.exists(plot_dir):
+                os.mkdir(plot_dir)
+
+            for flight_fp, img_dict in store_dict.items():
+                images_names = list(img_dict)
+                n_images = len(images_names)
+                if n_images > 0:
+                    current_fp = os.path.join(flight_fp,images_names[0])
+                    warp_matrices, cropped_dimensions = self.get_warp_matrices(current_fp)
+                    for image_name,bboxes in img_dict.items():
+                        current_fp = os.path.join(flight_fp,image_name)
+                        cap = mutils.import_captures(current_fp)
+                        rgb_image = mutils.aligned_capture_rgb(cap, warp_matrices, cropped_dimensions, normalisation=False)
+                        # filename
+                        parent_dir = mutils.get_all_dir(flight_fp)
+                        fn = parent_dir + '_{}'.format(image_name)
+                        full_fn = os.path.join(plot_dir,fn)
+                        # plot
+                        fig, ax = plt.subplots()
+                        ax.imshow(rgb_image)
+                        for categories, bbox in bboxes.items():
+                            coord, w, h = mutils.bboxes_to_patches(bbox)
+                            rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor=self.color_mapping[categories], facecolor='none')
+                            patch = ax.add_patch(rect)
+                        ax.set_title(f'True RGB ({fn})')
+                        ax.axis('off')
+                        ax.legend(lines,labels,loc='center left',bbox_to_anchor=(1.0, 0.5))
+                        plt.tight_layout()
+                        plt.show()
+                        #save plots
+                        fig.savefig('{}.png'.format(full_fn))
     
     def get_multispectral_bboxes(self,parent_dir,img_fp,img_bboxes=None,warp_matrices=None, cropped_dimensions=None):
         """ 

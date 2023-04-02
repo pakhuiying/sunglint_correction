@@ -80,7 +80,7 @@ def import_captures(current_fp):
     cap = capture.Capture.from_filelist(fn)
     return cap
 
-def aligned_capture_rgb(capture, warp_matrices, cropped_dimensions, img_type = 'reflectance',interpolation_mode=cv2.INTER_LANCZOS4):
+def aligned_capture_rgb(capture, warp_matrices, cropped_dimensions, normalisation = True, img_type = 'reflectance',interpolation_mode=cv2.INTER_LANCZOS4):
     """ 
     :param capture (capture object): for 10-bands image
     :param warp_matrices (mxmx3 np.ndarray): in rgb order of [2,1,0] loaded from pickle
@@ -115,15 +115,18 @@ def aligned_capture_rgb(capture, warp_matrices, cropped_dimensions, img_type = '
     (left, top, w, h) = tuple(int(i) for i in cropped_dimensions)
     im_cropped = im_aligned[top:top+h, left:left+w][:]
 
-    # get normalised rgb image
-    im_min = np.percentile(im_cropped.flatten(),  0.1)  # modify with these percentilse to adjust contrast
-    im_max = np.percentile(im_cropped.flatten(), 99.9)  # for many images, 0.5 and 99.5 are good values
+    if normalisation is True:
+        # get normalised rgb image
+        im_min = np.percentile(im_cropped.flatten(),  0.1)  # modify with these percentilse to adjust contrast
+        im_max = np.percentile(im_cropped.flatten(), 99.9)  # for many images, 0.5 and 99.5 are good values
 
-    im_display = np.zeros((im_cropped.shape[0],im_cropped.shape[1],len(rgb_band_indices)), dtype=np.float32)
-    
-    for i in range(len(rgb_band_indices)):
-        im_display[:,:,i] = imageutils.normalize(im_cropped[:,:,i], im_min, im_max)
-    
+        im_display = np.zeros((im_cropped.shape[0],im_cropped.shape[1],len(rgb_band_indices)), dtype=np.float32)
+        
+        for i in range(len(rgb_band_indices)):
+            im_display[:,:,i] = imageutils.normalize(im_cropped[:,:,i], im_min, im_max)
+    else:
+        im_display = im_cropped
+
     return im_display
 
 def bboxes_to_patches(bboxes):
@@ -175,3 +178,13 @@ def plot_bboxes(fp):
                 patch = ax.add_patch(rect)
     plt.show()
     return 
+
+def get_all_dir(fp,iter=3):
+    """ get all parent sub directories up to iter (int) levels"""
+    fp_temp = fp
+    sub_dir_list = []
+    for i in range(iter):
+        base_fn, fn = os.path.split(fp_temp)
+        sub_dir_list.append(fn)
+        fp_temp = base_fn
+    return '_'.join(reversed(sub_dir_list))
