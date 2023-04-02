@@ -1,2 +1,6 @@
 __pycache__
 rawimages/
+QAQC_plots/
+saved_bboxes/
+saved_bboxes_complement/
+saved_plots/

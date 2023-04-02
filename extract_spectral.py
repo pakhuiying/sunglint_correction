@@ -142,6 +142,7 @@ class ExtractSpectral:
                         # filename
                         parent_dir = mutils.get_all_dir(flight_fp)
                         fn = parent_dir + '_{}'.format(image_name)
+                        fn = fn.replace('.tif','')
                         full_fn = os.path.join(plot_dir,fn)
                         # plot
                         fig, ax = plt.subplots()
