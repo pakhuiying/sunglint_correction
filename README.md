@@ -34,9 +34,11 @@ Buttons on the right helps in toggling the mode of selection (drawing bboxes)
 
 - `Prev`: go to the previous image
 
-- `Next`: go to the next image
+- `Next`: go to the next image (bboxes and plots will be automatically saved to *saved_bboxes* and *saved_plots* when `Next` is clicked)
 
 - `Save`: save the current bboxes
+
+- `IMG_index`: Enter the image index number in the text box to jump immediately to that image, instead of having to repeatedly click `Next`
 
 
 ## Example on how to use `get_training_data.py`
