@@ -158,17 +158,48 @@ class ExtractSpectral:
                         plt.show()
                         #save plots
                         fig.savefig('{}.png'.format(full_fn))
-    
-    def get_multispectral_bboxes(self,parent_dir,img_fp,img_bboxes=None,warp_matrices=None, cropped_dimensions=None):
+
+class ExtractSpectralIndividual:
+    def __init__(self, parent_dir,img_fp,img_bboxes=None,warp_matrices=None, cropped_dimensions=None):
+        """ 
+        :param parent_dir (str): folder which contains raw images (keys of store_bboxes()) e.g. F:/surveys_10band/10thSur24Aug/F1/RawImg
+        :param img_fp (str): image name e.g. 'IMG_0004_1.tif'
+        :param img_bboxes (dict): bboxes of corresponding img_fp. 
+            keys are categories e.g. turbid_glint, turbid, water_glint, water and shore, and values are the corresponding bboxes
+        :param warp_matrices (list of arrays): to align band images
+        :param cropped_dimensions (tuple): to cropp images for band images alignment
+        returns multispectral reflectance (im_aligned), and bboxes of categories
+        """
+        self.parent_dir = parent_dir
+        self.img_fp = img_fp
+        self.img_bboxes = img_bboxes
+        self.warp_matrices = warp_matrices
+        self.cropped_dimensions = cropped_dimensions
+        # initialise categories
+        self.button_names = ['turbid_glint','water_glint','turbid','water','shore']
+        # intialise colours
+        self.colors = ['orange','cyan','saddlebrown','blue','yellow']
+        self.color_mapping = {categories:colors for categories,colors in zip(self.button_names,self.colors)}
+        # import wavelengths for each band
+        wavelengths = mutils.sort_bands_by_wavelength()
+        self.wavelength_dict = {i[0]:i[1] for i in wavelengths}
+        self.n_bands = len(wavelengths)
+        self.wavelengths_idx = np.array([i[0] for i in wavelengths])
+        self.wavelengths = np.array([i[1] for i in wavelengths])
+        # aligning band images
+        self.warp_mode = cv2.MOTION_HOMOGRAPHY
+        self.img_type = "reflectance"
+
+    def get_multispectral_bboxes(self):
         """ 
         :param parent_dir (str): folder which contains raw images (keys of store_bboxes()) e.g. F:/surveys_10band/10thSur24Aug/F1/RawImg
         :param img_fp (str): image name e.g. 'IMG_0004_1.tif'
         :param img_bboxes (dict): keys are categories e.g. turbid_glint, turbid, water_glint, water and shore, and values are the corresponding bboxes
         :param warp_matrices (list of arrays): to align band images
         :param cropped_dimensions (tuple): to cropp images for band images alignment
-        returns multispectral reflectance (im_aligned), and bboxes of categories
+        returns multispectral reflectance (im_aligned), and bboxes of categories associated to the image
         """
-        fp = os.path.join(parent_dir,img_fp)
+        fp = os.path.join(self.parent_dir,self.img_fp)
         cap = mutils.import_captures(fp)
         if warp_matrices is None and cropped_dimensions is None:
             warp_matrices = cap.get_warp_matrices()
@@ -177,19 +208,19 @@ class ExtractSpectral:
         im_aligned = imageutils.aligned_capture(cap, warp_matrices, self.warp_mode, cropped_dimensions, None, img_type=self.img_type)
         if img_bboxes is None:
             img_bboxes = self.store_bboxes()
-        bboxes = img_bboxes[parent_dir][img_fp]
+        bboxes = img_bboxes[self.parent_dir][self.img_fp]
         return im_aligned, bboxes
 
-    def plot_multispectral(self,parent_dir,img_fp,img_bboxes=None,warp_matrices=None, cropped_dimensions=None):
+    def plot_multispectral(self):
         """ 
         :param parent_dir (str): folder which contains raw images (keys of store_bboxes()) e.g. F:/surveys_10band/10thSur24Aug/F1/RawImg
         :param img_fp (str): image name e.g. 'IMG_0004_1.tif'
         :param img_bboxes (dict): keys are categories e.g. turbid_glint, turbid, water_glint, water and shore, and values are the corresponding bboxes
         :param warp_matrices (list of arrays): to align band images
         :param cropped_dimensions (tuple): to cropp images for band images alignment
-        returns a plot of the rgb_image, drawn bboxes, and spectral reflectance
+        returns a plot of the rgb_image, drawn bboxes, and spectral reflectance (fractional reflectances)
         """
-        im_aligned, bboxes = self.get_multispectral_bboxes(parent_dir,img_fp,img_bboxes,warp_matrices, cropped_dimensions)
+        im_aligned, bboxes = self.get_multispectral_bboxes()
         
         n_cats = len(list(bboxes)) # number of categories based on bboxes drawn
 
@@ -203,9 +234,9 @@ class ExtractSpectral:
         ax0.set_title('True RGB')
         ax0.set_axis_off()
         # plot normalised rgb
-        rgb_image = mutils.get_rgb(im_aligned, normalisation = True, plot=False)
+        rgb_image_norm = mutils.get_rgb(im_aligned, normalisation = True, plot=False)
         ax1 = fig.add_subplot(spec[0, 1])
-        ax1.imshow(rgb_image)
+        ax1.imshow(rgb_image_norm)
         ax1.set_title('Normalised RGB')
         ax1.set_axis_off()
 
@@ -244,7 +275,7 @@ class ExtractSpectral:
             eb[-1][0].set_linestyle('--')
             ax_line.set_title(f'Spectra ({category})')
             ax_line.set_xlabel('Wavelength (nm)')
-            ax_line.set_ylabel('Reflectance (%)')
+            ax_line.set_ylabel('Reflectance')
         
         plt.show()
         
@@ -314,15 +345,19 @@ class ExtractSpectral:
         axcb = fig.colorbar(lc)
         axcb.set_label('NIR reflectance')
         ax.set_title('Spectra of glint area')
+        ax.set_ylabel('Reflectance')
+        ax.set_xlabel('Wavelength (nm)')
         plt.legend()
         plt.show()
         return (np.min(c),np.mean(c),np.max(c)) #where np.min(c) is the background NIR
 
-    def identify_glint(self,im_aligned,bbox,percentile_threshold=90,percentile_method='nearest',mode="rgb"):
+    def identify_glint(self,im_aligned,bbox,normalisation=False,percentile_threshold=90,percentile_method='nearest',mode="rgb"):
         """ 
         :param im_aligned (np.ndarray): 10 bands in band order i.e. band 1,2,3,4,5,6,7,8,9,10
         :param bbox (tuples or np.ndarray): e.g. ((x1,y1),(x2,y2))
         :param percentile_threshold (float): value between 0 and 100
+        :param normalisation (bool): whether to normalise the image. It can help with increasing the contrast to identify glint. 
+            However, non glint areas' contrast may be stretched to appear as glint which is misleading
         :param percentile_method (str): 'linear'(continuous) or 'nearest' (discontinuous method). 
             Note that for numpy version > 1.22, 'interpolation' argument is replaced with 'method', 'interpolation' is deprecated
         :param mode (str): 'rgb' or 'nir' which determines what mode is used for glint detection
@@ -339,7 +374,7 @@ class ExtractSpectral:
         
         rgb_bands = [2,1,0] #668, 560, 475 nm
         # rgb image
-        rgb_image = mutils.get_rgb(im_aligned[y1:y2,x1:x2,:],plot=False)
+        rgb_image = mutils.get_rgb(im_aligned[y1:y2,x1:x2,:],normalisation=normalisation,plot=False)
         nrow, ncol, _ = rgb_image.shape
 
         if mode == 'rgb':
@@ -347,7 +382,7 @@ class ExtractSpectral:
             rgb_images = [rgb_image[:,:,i] for i in range(3)] #bands 2,1,0
             # use percentile to identify glint threshold
             rgb_images_flatten = [i.flatten() for i in rgb_images]
-            glint_percentile = [np.percentile(i,percentile_threshold,interpolation=percentile_method) for i in rgb_images_flatten]
+            glint_percentile = [np.percentile(i,percentile_threshold,interpolation=percentile_method) for i in rgb_images_flatten] #get the value of the reflectance at percentile threshold
             glint_idxes = [np.argwhere(im>p) for p,im in zip(glint_percentile,rgb_images_flatten)]
             glint_idxes = [np.unravel_index(i,(nrow,ncol)) for i in glint_idxes]
             # combine the indices for each band
