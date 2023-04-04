@@ -220,16 +220,37 @@ class RadiometricCorrection:
         
         return model_coeff
 
+def get_panel_radiance(fp_list):
+    """
+    :param fp_list (list of str): list of filepath (in band order i.e. band 1,2,3,4,5,6,7,8,9,10) of panel filepaths
+    this function returns the panel_radiance (list of radiance for each band in band order i.e. band 1,2,3,4,5,6,7,8,9,10)
+    """
+    fp_list = mutils.order_bands_from_filenames(fp_list) # just in case fp_list is not sorted
+    cap = capture.Capture.from_filelist(fp_list)
+    panel_radiance = cap.panel_radiance()
+    return panel_radiance
+
+def get_panel_irradiance(panel_radiance,panel_albedo):
+    """
+    :param panel_radiance (list of radiance for each band in band order i.e. band 1,2,3,4,5,6,7,8,9,10)
+    :param panel_albedo (list of float): list of float ranging from 0 to 1. This parameter is fixed if the same panel is used
+    returns panel_irradiance
+    """
+    panel_irradiance = [mutils.panel_radiance_to_irradiance(radiance,albedo) for radiance, albedo in zip(panel_radiance,panel_albedo)]
+    return panel_irradiance
 class CorrectionFactor:
     def __init__(self,panel_radiance,dls_panel_irr_calibration,panel_albedo=None):
         """ 
         :param dls_panel_irr_calibration (dict): where keys (int) are band number (0 to 9), and values are dict, with keys coeff and intercept
-        :param panel_albedo (list of float): list of float ranging from 0 to 1. This parameter is fixed if the same panel is used
+            loaded from saved_data
         :param panel_radiance (list of float): radiance of panel (mission-specfic)
+            loaded from get_panel_radiance
+        :param panel_albedo (list of float): list of float ranging from 0 to 1. This parameter is fixed if the same panel is used
+        returns correction factor for each band (list of float)
         """
         self.dls_panel_irr_calibration = dls_panel_irr_calibration
         if panel_albedo is not None:
-            self.panel_albedo = panel_albedo
+            self.panel_albedo = panel_albedo #flexibility to use ur own calibration panel, otherwise we will use micasense's panel reflectance values
         else:
             self.panel_albedo = [0.48112499999999997,
             0.4801333333333333,
@@ -245,7 +266,9 @@ class CorrectionFactor:
         self.correction_factor = self.get_correction()
     
     def get_correction(self):
-        """ outputs a list of float values in band order i.e. band 1,2,3,4,5,6,7,8,9,10"""
+        """ 
+        outputs a list of float values in band order i.e. band 1,2,3,4,5,6,7,8,9,10
+        """
         assert len(self.panel_albedo) == len(self.panel_radiance), "panel_albedo bands must equal to panel_radiance bands"
         correction_factor = []
         for band_number,model_calib in self.dls_panel_irr_calibration.items():
