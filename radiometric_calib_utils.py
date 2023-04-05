@@ -1,7 +1,7 @@
 import micasense.capture as capture
 import os, glob
 import json
-import tqdm
+from tqdm import tqdm
 import pickle #This library will maintain the format as well
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
@@ -23,8 +23,10 @@ def list_img_subdir(dir):
                     print("RawImg folder not found!")
     return img_dir
 
-def save_fp_panels(dir):
+def save_fp_panels(dir,save_dir=None):
     """ 
+    :param dir (str): directory which stores all flight images
+    :param save_dir (str): name of the folder where saved data are saved
     given the directory, find all the panel images in the subdirectories and save the filepaths in a dictionary
     >>> save_fp_panels(r"F:\surveys_10band")
     """
@@ -34,9 +36,13 @@ def save_fp_panels(dir):
     for k in tqdm(RawImg_json.keys()):
         RawImg_json[k] = get_panels(dir = k,search_n=3)
 
-    if not os.path.exists('saved_data'):
+    if not os.path.exists('saved_data') and save_dir is None:
+        dir = 'saved_data'
         os.mkdir('saved_data')
-    with open(os.path.join('saved_data','panel_fp.json'), 'w') as fp:
+    else:
+        dir = save_dir
+        os.mkdir(dir)
+    with open(os.path.join(dir,'panel_fp.json'), 'w') as fp:
         json.dump(RawImg_json, fp)
     
     return
@@ -104,7 +110,7 @@ def import_panel_reflectance(panelNames):
 
 
 
-def import_panel_irradiance(panelNames,panel_reflectance_by_band):
+def import_panel_irradiance(panelNames,panel_reflectance_by_band=None):
     """
     :param PanelNames (list of str): full file path of panelNames
     :param panel_reflectance_by_band (list of float): reflectance values ranging from 0 to 1. 
@@ -113,6 +119,8 @@ def import_panel_irradiance(panelNames,panel_reflectance_by_band):
     if panelNames is not None:
         panelCap = capture.Capture.from_filelist(panelNames)
         # by calling panel_irradiance, it already accounts for all the radiometric calibration and correcting of vignetting effect and lens distortion
+        # if panel_reflectance_by_band is None, internally when panel_irradiance is called,
+        # reflectance of panel will be obtained from reflectance_from_panel_serial()
         panel_irradiance = panelCap.panel_irradiance(panel_reflectance_by_band)
         # by calling dls_irradiance, it already returns a list of the corrected earth-surface (horizontal) DLS irradiance in W/m^2/nm
         dls_irradiance = panelCap.dls_irradiance()
@@ -121,50 +129,38 @@ def import_panel_irradiance(panelNames,panel_reflectance_by_band):
         print("Panels not found")
         return None
 
-def save_dls_panel_irr(panel_fp,panel_albedo):
-    """ save panel and dls irradiance for each band """
+def save_dls_panel_irr(panel_fp,panel_albedo=None,save_dir=None):
+    """ 
+    :param panel_fp (dict): where key is the subdirectory that refers to each flight, and keys is a list of list of all panel captures
+    :param panel_albedo (list of float): if none, it will detect the reflectance from the panel's QR code
+    save panel and dls irradiance for each band 
+    """
     dls_panel_irr = {k:[] for k in panel_fp.keys()}
     for k,list_of_caps in tqdm(panel_fp.items()):
         for cap in list_of_caps:
             dls_panel_dict = import_panel_irradiance(cap,panel_albedo)
             dls_panel_irr[k].append(dls_panel_dict)
     
-    if not os.path.exists('saved_data'):
+    if not os.path.exists('saved_data') and save_dir is None:
         os.mkdir('saved_data')
-    with open(os.path.join('saved_data','dls_panel_irr.ob'), 'wb') as fp:
+        dir = 'saved_data'
+    else:
+        dir = save_dir
+        if not os.path.exists(dir):
+            os.mkdir(dir)
+    with open(os.path.join(dir,'dls_panel_irr.ob'), 'wb') as fp:
         pickle.dump(dls_panel_irr,fp)
     
     return dls_panel_irr
 
-
-def load_panel_albedo(fp):
-    """
-    load panel albedo (values range from 0 to 1) in band order i.e. 1,2,3,4,5,6,7,8,9,10 (note that it is not in the order of wavelength, but band order)
-    """
-    with open(fp, 'rb') as fp:
-        panel_albedo = pickle.load(fp)
-
-    return panel_albedo
-
-def load_center_wavelengths(fp):
-    """
-    load center_wavelengths in band order i.e. 1,2,3,4,5,6,7,8,9,10 (note that it is not in the order of wavelength, but band order)
-    with open(os.path.join('saved_data','center_wavelengths_by_band.ob'), 'wb') as fp:
-        pickle.dump(center_wavelengths,fp)
-    """
-    with open(fp, 'rb') as fp:
-        center_wavelengths = pickle.load(fp)
-
-    return center_wavelengths
-
-def load_dls_panel_irr(fp):
-    with open(fp, 'rb') as fp:
-        dls_panel_irr = pickle.load(fp)
-
-    return dls_panel_irr
-
 class RadiometricCorrection:
     def __init__(self,dls_panel_irr,center_wavelengths,dls_panel_irr_calibration=None):
+        """
+        :param dls_panel_irr (dict): contains the paired info of panel and dls irradiance for each flight
+        :param center_wavelengths (list of float): center wavelengths of the bands in micasense camera
+        dls_panel_irr_calibration (dict): where keys are band number, and keys are model coefficients 
+        if dls_panel_irr_calibration is None, then it will fit a model to the data again using dls_panel_irr
+        """
         self.dls_panel_irr = dls_panel_irr
         self.number_of_bands = 10
         self.center_wavelengths = center_wavelengths
@@ -238,47 +234,103 @@ def get_panel_irradiance(panel_radiance,panel_albedo):
     """
     panel_irradiance = [mutils.panel_radiance_to_irradiance(radiance,albedo) for radiance, albedo in zip(panel_radiance,panel_albedo)]
     return panel_irradiance
-class CorrectionFactor:
-    def __init__(self,panel_radiance,dls_panel_irr_calibration,panel_albedo=None):
+class ImageCorrection:
+    def __init__(self,cap,dls_panel_irr_calibration,panel_albedo=None):
         """ 
+        :param cap (capture object): from capture.Capture.from_filelist(image_names)
         :param dls_panel_irr_calibration (dict): where keys (int) are band number (0 to 9), and values are dict, with keys coeff and intercept
             loaded from saved_data
-        :param panel_radiance (list of float): radiance of panel (mission-specfic)
-            loaded from get_panel_radiance
+        :param dls_irradiance (list of float): irradiance from dls for each image (image and mission-specific)
         :param panel_albedo (list of float): list of float ranging from 0 to 1. This parameter is fixed if the same panel is used
-        returns correction factor for each band (list of float)
+        returns correction factor for each band (list of float).
+        The corection factor is related to the ratio between the DLS and CRP irradiance on calibration images
+        This correction ratio is the same for irradiance or radiance, as irradiance is simple radiance * pi
+        We have to apply the correction for every image
         """
         self.dls_panel_irr_calibration = dls_panel_irr_calibration
         if panel_albedo is not None:
             self.panel_albedo = panel_albedo #flexibility to use ur own calibration panel, otherwise we will use micasense's panel reflectance values
         else:
             self.panel_albedo = [0.48112499999999997,
-            0.4801333333333333,
-            0.4788733333333333,
-            0.4768433333333333,
-            0.4783016666666666,
-            0.4814866666666666,
-            0.48047166666666663,
-            0.4790833333333333,
-            0.47844166666666665,
-            0.4780333333333333]
-        self.panel_radiance = panel_radiance
+                                0.4801333333333333,
+                                0.4788733333333333,
+                                0.4768433333333333,
+                                0.4783016666666666,
+                                0.4814866666666666,
+                                0.48047166666666663,
+                                0.4790833333333333,
+                                0.47844166666666665,
+                                0.4780333333333333]
+        self.cap = cap
+        # radiance has already been undistorted
+        self.radiance = [img.undistorted(img.radiance()) for img in self.cap.images] #image radiance (list of arrays)
+        dls_irradiance = cap.dls_irradiance()
+        self.dls_irradiance = dls_irradiance
+        self.dls_radiance = dls_irradiance/np.pi
         self.correction_factor = self.get_correction()
     
+    @classmethod
+    def get_cap_from_filename(cls, image_names,dls_panel_irr_calibration):
+        """
+        :param image_names (list of str): filenames of images
+        """
+        image_names = mutils.order_bands_from_filenames(image_names)
+        cap = capture.Capture.from_filelist(image_names)
+        return cls(cap,dls_panel_irr_calibration)
+
+
     def get_correction(self):
         """ 
         outputs a list of float values in band order i.e. band 1,2,3,4,5,6,7,8,9,10
+        the correction_factor can then be multiplied to image radiance to get the radiometrically calibrated and corrected reflectance
         """
-        assert len(self.panel_albedo) == len(self.panel_radiance), "panel_albedo bands must equal to panel_radiance bands"
+        assert len(self.panel_albedo) == len(self.dls_irradiance), "panel_albedo bands must equal to panel_radiance bands"
         correction_factor = []
         for band_number,model_calib in self.dls_panel_irr_calibration.items():
             a = model_calib['coeff']
             b = model_calib['intercept']
-            rho_crp = self.panel_albedo[band_number]
-            L_crp = self.panel_radiance[band_number]
-            cf = a/(1-b*rho_crp/(np.pi*L_crp))
+            # rho_crp = self.panel_albedo[band_number]
+            # L_crp = self.panel_radiance[band_number]
+            # cf = a/(1-b*rho_crp/(np.pi*L_crp))
+            # correction_factor.append(cf)
+            dls_radiance = self.dls_radiance[band_number]
+            cf_inverse = a*dls_radiance+b/np.pi #basically computes the estimated L_CRP (crp radiance)
+            cf = 1/cf_inverse
             correction_factor.append(cf)
         return correction_factor
+    
+    def corrected_image(self):
+        """
+        returns radiometrically calibrated and corrected reflectance image
+        """
+        return [cf*radiance_im for radiance_im, cf in zip(self.radiance,self.correction_factor)]
+
+    def plot_difference(self,panel_irradiance):
+        """
+        plot difference between non-corrected data and radiometrically calibrated and corrected reflectance image,
+        where non-corrected data is 
+        """
+        corrected_img = self.corrected_image()
+        non_corrected_img_dls = self.cap.undistorted_reflectance(self.dls_irradiance)
+        non_corrected_img_panel = self.cap.undistorted_reflectance(panel_irradiance)
+        assert len(corrected_img) == len(non_corrected_img_dls) == len(non_corrected_img_panel)
+        n_images = len(corrected_img)
+
+        titles = ['Calibrated and Corrected reflectance','Corrected with only DLS','Corrected with only CRP']
+        fig, axes = plt.subplots(n_images,3)
+        for i in range(n_images):
+            # axes[i,0].imshow(corrected_img[i],vmin=0,vmax=1)
+            # axes[i,1].imshow(non_corrected_img_dls[i],vmin=0,vmax=1)
+            # axes[i,2].imshow(non_corrected_img_panel[i],vmin=0,vmax=1)
+            ims = [corrected_img[i],non_corrected_img_dls[i],non_corrected_img_panel[i]]
+            for ax,title,im in zip(axes[i,:], titles,ims):
+                ax.imshow(im,vmin=0,vmax=1)
+                avg_reflectance = np.mean(im)
+                ax.set_title(f'{title} ({avg_reflectance:.3f})')
+            
+        plt.tight_layout()
+        plt.show()
+
 
 def radiometric_corrected_aligned_captures(cap,cf,img_type = "reflectance"):
     """
