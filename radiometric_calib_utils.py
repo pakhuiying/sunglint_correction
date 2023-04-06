@@ -237,7 +237,7 @@ def get_panel_irradiance(panel_radiance,panel_albedo):
 class ImageCorrection:
     def __init__(self,cap,dls_panel_irr_calibration,panel_albedo=None):
         """ 
-        :param cap (capture object): from capture.Capture.from_filelist(image_names)
+        :param cap (capture object): from capture.Capture.from_filelist(image_names), an image that is not panel
         :param dls_panel_irr_calibration (dict): where keys (int) are band number (0 to 9), and values are dict, with keys coeff and intercept
             loaded from saved_data
         :param dls_irradiance (list of float): irradiance from dls for each image (image and mission-specific)
@@ -263,11 +263,14 @@ class ImageCorrection:
                                 0.4780333333333333]
         self.cap = cap
         # radiance has already been undistorted
-        self.radiance = [img.undistorted(img.radiance()) for img in self.cap.images] #image radiance (list of arrays)
+        self.radiance = [img.undistorted_radiance() for img in self.cap.images]# gets the same results as [img.undistorted(img.radiance()) for img in self.cap.images] #image radiance (list of arrays)
         dls_irradiance = cap.dls_irradiance()
         self.dls_irradiance = dls_irradiance
-        self.dls_radiance = dls_irradiance/np.pi
+        self.dls_radiance = [i/np.pi for i in dls_irradiance]
         self.correction_factor = self.get_correction()
+        #TODO: add try and except for load_pickle
+        self.wavelength_by_band = mutils.load_pickle('saved_data/center_wavelengths_by_band.ob')
+        self.wavelength_dict = {i:w for i,w in enumerate(self.wavelength_by_band)}
     
     @classmethod
     def get_cap_from_filename(cls, image_names,dls_panel_irr_calibration):
@@ -292,7 +295,6 @@ class ImageCorrection:
             # rho_crp = self.panel_albedo[band_number]
             # L_crp = self.panel_radiance[band_number]
             # cf = a/(1-b*rho_crp/(np.pi*L_crp))
-            # correction_factor.append(cf)
             dls_radiance = self.dls_radiance[band_number]
             cf_inverse = a*dls_radiance+b/np.pi #basically computes the estimated L_CRP (crp radiance)
             cf = 1/cf_inverse
@@ -305,31 +307,78 @@ class ImageCorrection:
         """
         return [cf*radiance_im for radiance_im, cf in zip(self.radiance,self.correction_factor)]
 
-    def plot_difference(self,panel_irradiance):
+    def get_reflectance_image(self,plot = True):
+        """
+        get cap's reflectance image, 
+        by default, if irradiance is not supplied, then it will use the horizontal dls data found in image metadata
+        """
+        if plot is True:
+            fig, ax = plt.subplots(10,1,figsize=(5,20))
+            reflectance_imges = [i.reflectance() for i in self.cap.images]
+            for i,r in enumerate(reflectance_imges):
+                ax[i].imshow(r)
+                ax[i].set_title(f'Band {self.wavelength_by_band[i]}\nMean reflectance {np.mean(r):.3f}')
+            plt.tight_layout()
+            plt.show()
+            return 
+        else:
+            return [i.reflectance() for i in self.cap.images] #in band order (e.g.bands 0,1,2,3,4,5,6,7,8,9)
+        
+    def plot_difference_dls_crp_irradiance(self,panel_irradiance):
+        """plot the difference in dls and crp irradiance"""
+        plt.figure()
+        plt.plot(self.wavelength_by_band,panel_irradiance,'o',label="CRP irradiance")
+        plt.plot(self.wavelength_by_band,self.dls_irradiance,'o',label="DLS irradiance")
+        plt.xlabel('Wavelength (nm)')
+        plt.ylabel(r'Irradiance $W/m^2/nm$')
+        plt.legend()
+        plt.show()
+
+    def plot_different_corrected_image(self,panel_irradiance,plot_image = True):
         """
         plot difference between non-corrected data and radiometrically calibrated and corrected reflectance image,
         where non-corrected data is 
         """
-        corrected_img = self.corrected_image()
-        non_corrected_img_dls = self.cap.undistorted_reflectance(self.dls_irradiance)
+        corrected_img = self.corrected_image() #ordered by band i.e. band 1,2,3,4,5,6,7,8,9,10
+        non_corrected_img_dls = [i.reflectance() for i in self.cap.images] # already undistorted, corrected for vignetting etc
+        # non_corrected_img_dls = self.cap.undistorted_reflectance(self.dls_irradiance)
         non_corrected_img_panel = self.cap.undistorted_reflectance(panel_irradiance)
         assert len(corrected_img) == len(non_corrected_img_dls) == len(non_corrected_img_panel)
         n_images = len(corrected_img)
 
         titles = ['Calibrated and Corrected reflectance','Corrected with only DLS','Corrected with only CRP']
-        fig, axes = plt.subplots(n_images,3)
-        for i in range(n_images):
-            # axes[i,0].imshow(corrected_img[i],vmin=0,vmax=1)
-            # axes[i,1].imshow(non_corrected_img_dls[i],vmin=0,vmax=1)
-            # axes[i,2].imshow(non_corrected_img_panel[i],vmin=0,vmax=1)
-            ims = [corrected_img[i],non_corrected_img_dls[i],non_corrected_img_panel[i]]
-            for ax,title,im in zip(axes[i,:], titles,ims):
-                ax.imshow(im,vmin=0,vmax=1)
-                avg_reflectance = np.mean(im)
-                ax.set_title(f'{title} ({avg_reflectance:.3f})')
-            
-        plt.tight_layout()
-        plt.show()
+        
+        if plot_image is True:
+            fig, axes = plt.subplots(n_images,3,figsize=(15,30))
+            for i in range(n_images):
+                # axes[i,0].imshow(corrected_img[i],vmin=0,vmax=1)
+                # axes[i,1].imshow(non_corrected_img_dls[i],vmin=0,vmax=1)
+                # axes[i,2].imshow(non_corrected_img_panel[i],vmin=0,vmax=1)
+                ims = [corrected_img[i],non_corrected_img_dls[i],non_corrected_img_panel[i]]
+                for ax,title,im in zip(axes[i,:], titles,ims):
+                    ax.imshow(im,vmin=0,vmax=1)
+                    ax.axis('off')
+                    avg_reflectance = np.mean(im)
+                    ax.set_title(f'Band {self.wavelength_by_band[i]}\n{title}\nMean reflectance: {avg_reflectance:.3f}')
+                
+            plt.tight_layout()
+            plt.show()
+            return
+        
+        else:
+            corrected_img = [np.mean(i) for i in corrected_img]
+            non_corrected_img_dls = [np.mean(i) for i in non_corrected_img_dls]
+            non_corrected_img_panel = [np.mean(i) for i in non_corrected_img_panel]
+            plt.figure()
+            mean_reflectances = [corrected_img,non_corrected_img_dls,non_corrected_img_panel]
+            for i,r in enumerate(mean_reflectances):
+                plt.plot(self.wavelength_by_band,r,'o',label=titles[i])
+            plt.title('Comparison of reflectances')
+            plt.legend(loc='center left',bbox_to_anchor=(1.04, 0.5))
+            plt.show()
+            return
+
+
 
 
 def radiometric_corrected_aligned_captures(cap,cf,img_type = "reflectance"):
