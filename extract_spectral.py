@@ -22,12 +22,31 @@ import numpy as np
 from math import ceil
 
 
-class ExtractSpectral:
-    def __init__(self,dir):
+def get_warp_matrices(current_fp):
+    """ 
+    helper function to get wrap_matrices from an image filename e.g. .../IMG_0041_1..tif
+    from current_fp, import captures and output warp_matrices and cropped_dimensions
+    """
+    cap = mutils.import_captures(current_fp)
+    warp_matrices = cap.get_warp_matrices()
+    cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
+    return warp_matrices, cropped_dimensions
+
+class VerifyBboxes:
+    def __init__(self,dir, assign_new_dir = None, split_iter=3):
         """ 
         :param dir (str): directory of where all the bboxes (.txt) are stored i.e. saved_bboxes/
+        :param assign_new_dir (str): new parent_dir to replace with
+        :param split_iter (int): iterations to split the os.path to get to the parent_directory
+            this function is meant to import panel images from user's local directory even though fp in panel_fp belongs to another platform.
+            in that way, the user do not have to search for all the panel images in their local machine as it will be very time consuming
+        this function is basically a helper class to erify that bboxes are plotted correctly
+        this function just checks whether bboxes are plotted correctly. 
+        It does not extract the spectral information as radiometric calibration & correction has not been done using the panel images
         """
         self.dir = dir
+        self.assign_new_dir = assign_new_dir
+        self.split_iter = split_iter
         # initialise categories
         self.button_names = ['turbid_glint','water_glint','turbid','water','shore']
         # intialise colours
@@ -43,6 +62,24 @@ class ExtractSpectral:
         self.warp_mode = cv2.MOTION_HOMOGRAPHY
         self.img_type = "reflectance"
 
+    def assign_new_parent_dir(self,fp):
+        """
+        :param fp (str): file path of image
+        """
+        if self.assign_new_dir is not None:
+            fp_temp = fp
+            dirs = []
+            for i in range(self.split_iter):
+                prev_dir, next_dir = os.path.split(fp_temp)
+                dirs.append(next_dir)
+                fp_temp = prev_dir
+
+            new_parent_dir = os.path.join(self.assign_new_dir,*reversed(dirs)) #* is a splat operator to make all items in list as arguments
+        else:
+            new_parent_dir = fp
+
+        return new_parent_dir
+
     def store_bboxes(self):
         """ 
         get all the bboxes txt files are store the info in a dictionary with keys:
@@ -55,12 +92,16 @@ class ExtractSpectral:
             with open(fp, 'r') as fp:
                 data = json.load(fp)
             basename,file_name = os.path.split(list(data)[0])
+            if self.assign_new_dir is not None:
+                basename = self.assign_new_parent_dir(basename)
             store_dict[basename] = dict()
         
         for fp in fp_list:
             with open(fp, 'r') as fp:
                 data = json.load(fp)
             basename,file_name = os.path.split(list(data)[0])
+            if self.assign_new_dir is not None:
+                basename = self.assign_new_parent_dir(basename)
             bboxes = {k: v for d in data.values() for k,v in d.items() if v is not None}
             if bool(bboxes) is True:
                 store_dict[basename][file_name] = bboxes
@@ -68,20 +109,12 @@ class ExtractSpectral:
             
         return store_dict
 
-    def get_warp_matrices(self,current_fp):
-        """ 
-        from current_fp, import captures and output warp_matrices and cropped_dimensions
-        """
-        cap = mutils.import_captures(current_fp)
-        warp_matrices = cap.get_warp_matrices()
-        cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
-        return warp_matrices, cropped_dimensions
-
+    
     def plot_bboxes(self,show_n = 6,figsize=(8,20),save = False):
         """ 
         :param dir (str): directory of where all the bboxes (.txt) are stored i.e. saved_bboxes/
         :param show_n (int): show how many plots. if number of images exceeds show_n, plot only show_n
-        :param save (bool): save individual images if save is True
+        :param save (bool): save individual images if save is True. images are saved in folder 'QAQC_plots'
         """
         store_dict = self.store_bboxes()
         # add legends
@@ -95,7 +128,7 @@ class ExtractSpectral:
                 n_images = len(images_names)
                 if n_images > 0:
                     current_fp = os.path.join(flight_fp,images_names[0])
-                    warp_matrices, cropped_dimensions = self.get_warp_matrices(current_fp)
+                    warp_matrices, cropped_dimensions = get_warp_matrices(current_fp)
 
                     if show_n is None:
                         fig, axes = plt.subplots(ceil(n_images/2),2)
@@ -134,7 +167,7 @@ class ExtractSpectral:
                 n_images = len(images_names)
                 if n_images > 0:
                     current_fp = os.path.join(flight_fp,images_names[0])
-                    warp_matrices, cropped_dimensions = self.get_warp_matrices(current_fp)
+                    warp_matrices, cropped_dimensions = get_warp_matrices(current_fp)
                     for image_name,bboxes in img_dict.items():
                         current_fp = os.path.join(flight_fp,image_name)
                         cap = mutils.import_captures(current_fp)
@@ -151,30 +184,63 @@ class ExtractSpectral:
                             coord, w, h = mutils.bboxes_to_patches(bbox)
                             rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor=self.color_mapping[categories], facecolor='none')
                             patch = ax.add_patch(rect)
+                            ax.text(coord[0],coord[1]+40,categories,bbox={'facecolor': 'white', 'alpha': 0.35},fontsize=7)
                         ax.set_title(f'True RGB ({fn})')
                         ax.axis('off')
                         ax.legend(lines,labels,loc='center left',bbox_to_anchor=(1.0, 0.5))
                         plt.tight_layout()
-                        plt.show()
+                        # plt.show()
                         #save plots
                         fig.savefig('{}.png'.format(full_fn))
+                        plt.close() # to not show any plots
 
+# TODO: refactor the entire code below, by including radiometric correction. to ensure that spectral info from different env conditions are consistent
+# TODO: include code for
+            # - undistorted image,
+            # - radiometrically calibrated using calibration panel, 
+            # - radiometrically corrected by applying the correction factor
+            # - band aligned and cropped
 class ExtractSpectralIndividual:
-    def __init__(self, parent_dir,img_fp,img_bboxes=None,warp_matrices=None, cropped_dimensions=None):
-        """ 
-        :param parent_dir (str): folder which contains raw images (keys of store_bboxes()) e.g. F:/surveys_10band/10thSur24Aug/F1/RawImg
-        :param img_fp (str): image name e.g. 'IMG_0004_1.tif'
-        :param img_bboxes (dict): bboxes of corresponding img_fp. 
-            keys are categories e.g. turbid_glint, turbid, water_glint, water and shore, and values are the corresponding bboxes
-        :param warp_matrices (list of arrays): to align band images
-        :param cropped_dimensions (tuple): to cropp images for band images alignment
-        returns multispectral reflectance (im_aligned), and bboxes of categories
+    # def __init__(self, parent_dir,img_fp,img_bboxes,warp_matrices=None, cropped_dimensions=None):
+    #     """ 
+    #     :param parent_dir (str): folder which contains raw images (keys of store_bboxes()) e.g. F:/surveys_10band/10thSur24Aug/F1/RawImg
+    #     :param img_fp (str): image name e.g. 'IMG_0004_1.tif'
+    #     :param img_bboxes (dict): bboxes of corresponding img_fp. 
+    #         keys are categories e.g. turbid_glint, turbid, water_glint, water and shore, and values are the corresponding bboxes
+    #     :param warp_matrices (list of arrays): to align band images
+    #     :param cropped_dimensions (tuple): to cropp images for band images alignment
+    #     returns multispectral reflectance (im_aligned), and bboxes of categories
+    #     """
+    #     self.parent_dir = parent_dir
+    #     self.img_fp = img_fp
+    #     self.img_bboxes = img_bboxes
+    #     self.warp_matrices = warp_matrices
+    #     self.cropped_dimensions = cropped_dimensions
+    #     self.im_aligned, self.bboxes = self.get_multispectral_bboxes()
+    #     # initialise categories
+    #     self.button_names = ['turbid_glint','water_glint','turbid','water','shore']
+    #     # intialise colours
+    #     self.colors = ['orange','cyan','saddlebrown','blue','yellow']
+    #     self.color_mapping = {categories:colors for categories,colors in zip(self.button_names,self.colors)}
+    #     # import wavelengths for each band
+    #     wavelengths = mutils.sort_bands_by_wavelength()
+    #     self.wavelength_dict = {i[0]:i[1] for i in wavelengths}
+    #     self.n_bands = len(wavelengths)
+    #     self.wavelengths_idx = np.array([i[0] for i in wavelengths])
+    #     self.wavelengths = np.array([i[1] for i in wavelengths])
+    #     # aligning band images
+    #     self.warp_mode = cv2.MOTION_HOMOGRAPHY
+    #     self.img_type = "reflectance"
+    def __init__(self,im_aligned, bboxes):
         """
-        self.parent_dir = parent_dir
-        self.img_fp = img_fp
-        self.img_bboxes = img_bboxes
-        self.warp_matrices = warp_matrices
-        self.cropped_dimensions = cropped_dimensions
+        :param im_aligned (np.ndarray) with dims mxnxc, a multispectral reflectance image which has been
+            - undistorted image,
+            - radiometrically calibrated using calibration panel, 
+            - radiometrically corrected by applying the correction factor
+            - band aligned and cropped
+        """
+        self.im_aligned = im_aligned
+        self.bboxes = bboxes
         # initialise categories
         self.button_names = ['turbid_glint','water_glint','turbid','water','shore']
         # intialise colours
@@ -186,9 +252,31 @@ class ExtractSpectralIndividual:
         self.n_bands = len(wavelengths)
         self.wavelengths_idx = np.array([i[0] for i in wavelengths])
         self.wavelengths = np.array([i[1] for i in wavelengths])
-        # aligning band images
-        self.warp_mode = cv2.MOTION_HOMOGRAPHY
-        self.img_type = "reflectance"
+
+    @classmethod
+    def from_bbox(cls,bbox_file):
+        """
+        bbox_file (str): filepath of one of the files in saved_bboxes
+        returns im_aligned, bboxes
+        """
+        warp_mode = cv2.MOTION_HOMOGRAPHY
+        img_type = "reflectance"
+
+        with open(bbox_file, 'r') as fp:
+            data = json.load(fp)
+        fp = list(data)[0]
+        bboxes = data[fp]
+
+        # check if filepath in bbox_file exists locally
+        if not os.path.exists(fp):
+            raise IOError("No files provided. Check your file paths.")
+        
+        cap = mutils.import_captures(fp)
+        warp_matrices = cap.get_warp_matrices()
+        cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
+        im_aligned = imageutils.aligned_capture(cap, warp_matrices, warp_mode, cropped_dimensions, None, img_type=img_type)
+        return cls(im_aligned, bboxes)
+
 
     def get_multispectral_bboxes(self):
         """ 
@@ -206,9 +294,9 @@ class ExtractSpectralIndividual:
             cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
 
         im_aligned = imageutils.aligned_capture(cap, warp_matrices, self.warp_mode, cropped_dimensions, None, img_type=self.img_type)
-        if img_bboxes is None:
-            img_bboxes = self.store_bboxes()
-        bboxes = img_bboxes[self.parent_dir][self.img_fp]
+        # if img_bboxes is None:
+        #     img_bboxes = self.store_bboxes()
+        bboxes = self.img_bboxes[self.parent_dir][self.img_fp]
         return im_aligned, bboxes
 
     def plot_multispectral(self):
@@ -220,7 +308,7 @@ class ExtractSpectralIndividual:
         :param cropped_dimensions (tuple): to cropp images for band images alignment
         returns a plot of the rgb_image, drawn bboxes, and spectral reflectance (fractional reflectances)
         """
-        im_aligned, bboxes = self.get_multispectral_bboxes()
+        # im_aligned, bboxes = self.get_multispectral_bboxes()
         
         n_cats = len(list(bboxes)) # number of categories based on bboxes drawn
 
