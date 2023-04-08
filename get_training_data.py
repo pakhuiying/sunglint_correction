@@ -3,7 +3,7 @@ from matplotlib.widgets import Button, TextBox
 import matplotlib.patches as patches
 import PIL.Image as Image
 import json
-from os.path import join, split, exists
+from os.path import join, split, exists, basename, splitext
 from os import listdir, mkdir, getcwd
 import numpy as np
 import cv2
@@ -68,29 +68,46 @@ def aligned_capture(capture, img_type = 'reflectance',interpolation_mode=cv2.INT
     
     return im_cropped, im_display # rgb image, normalised rgb image
 
-def get_current_img_counter(dir):
+def get_current_img_counter(dir, mode='raw'):
     """ 
-    list all the files in saved_bboxes to track which is the last processed image wrt to current dir
+    list all the files in saved_bboxes (raw) or QAQC_plots (rgb) to track which is the last processed image wrt to current dir
+    : param mode (str): raw or rgb. Raw mode means at the stage of labelling images, rgb mode means at the stage of QAQC labelled images
     """
-    if exists("saved_bboxes"):
-        stored_fp = listdir("saved_bboxes") 
-        selected_fp = []
-        for fp in stored_fp:
-            if all([i in dir for i in fp.split('_')[:2]]):
-                selected_fp.append(fp)
-        if len(selected_fp) > 0:
-            selected_img = sorted(selected_fp)[-1]
-            img_line = selected_img.split('IMG_')[1][:4]
-            img_counter = int(img_line) + 1
+    if mode == 'raw':
+        if exists("saved_bboxes"):
+            stored_fp = listdir("saved_bboxes") 
+            selected_fp = []
+            for fp in stored_fp:
+                if all([i in dir for i in fp.split('_')[:2]]):
+                    selected_fp.append(fp)
+            if len(selected_fp) > 0:
+                selected_img = sorted(selected_fp)[-1]
+                img_line = selected_img.split('IMG_')[1][:4]
+                img_counter = int(img_line) + 1
+            else:
+                img_counter = 0
         else:
             img_counter = 0
+        return img_counter
+    
+    elif mode == 'rgb':
+        last_image_fp = join("QAQC_relabel","last_image.txt")
+        if exists(last_image_fp):
+            with open(last_image_fp) as f:
+                last_image = f.readlines()[0]
+
+            img_counter = [i for i,fp in enumerate(dir) if last_image in fp][0]
+        else:
+            img_counter = 0
+
+        return img_counter
+    
     else:
-        img_counter = 0
-    return img_counter
+        return 0
 
 class LineBuilder:
     lock = "water"  # only one can be animated at a time
-    def __init__(self,dict_builder,fig,axes,im,im_norm,rgb_fp,img_counter):
+    def __init__(self,dict_builder,fig,axes,im,im_norm,rgb_fp,img_counter,mode):
         """
         :param dict_builder (dict): use it to save bboxes for different categories
         :param fig (mpl figure object)
@@ -123,6 +140,7 @@ class LineBuilder:
         self.current_fp = rgb_fp[self.img_counter]
         # keep track of saved img counter, only keep track when bboxes are drawn
         self.save_counter = img_counter
+        self.mode = mode
 
     def __call__(self, event):
         if any([event.inaxes != getattr(self,k+'_line').axes for k in self.categories]) is True:
@@ -140,7 +158,6 @@ class LineBuilder:
             getattr(self,k+'_line').figure.canvas.draw_idle()
             self.draw_rect(event)
         
-
     def draw_rect(self, _event):
         # img_index = self.img_counter%self.n_img
         # current_fp = self.rgb_fp[img_index] 
@@ -203,15 +220,23 @@ class LineBuilder:
             # print(save_bboxes)
             print(f'IMG_index: {self.save_counter}\nFilename: {save_fp}')
             # get unique filename from current_fp
-            fn = get_all_dir(save_fp,iter=4)
 
-            #create a new dir to store bboxes
-            store_dir = join(getcwd(),"saved_bboxes")
+            if self.mode == 'raw':
+                fn = get_all_dir(save_fp,iter=4)
+                #create a new dir to store bboxes
+                store_dir = join(getcwd(),"saved_bboxes")
+                #create a new dir to store plot images
+                plot_dir = join(getcwd(),"saved_plots")
+
+            elif self.mode == 'rgb':
+                fn = splitext(basename(save_fp))[0]
+                #create a new dir to store bboxes
+                store_dir = join(getcwd(),"QAQC_relabel")
+                plot_dir = store_dir
+
             if not exists(store_dir):
                 mkdir(store_dir)
 
-            #create a new dir to store plot images
-            plot_dir = join(getcwd(),"saved_plots")
             if not exists(plot_dir):
                 mkdir(plot_dir)
 
@@ -237,8 +262,12 @@ class LineBuilder:
         img_index = self.img_counter%self.n_img
         self.current_fp = self.rgb_fp[img_index] #update fp with current img counter
 
-        cap = mutils.import_captures(self.current_fp)
-        img, img_norm = aligned_capture(cap)
+        if self.mode == 'raw':
+            cap = mutils.import_captures(self.current_fp)
+            img, img_norm = aligned_capture(cap)
+        
+        elif self.mode == 'rgb':
+            img = np.asarray(Image.open(self.current_fp))
         
         # img = np.asarray(Image.open(current_fp))
         # img = Image.open(current_fp)
@@ -250,17 +279,22 @@ class LineBuilder:
         self.im.set_data(img)
         self.im.figure.canvas.draw_idle()
 
-        self.im_norm.set_extent((0,img_norm.shape[1],img_norm.shape[0],0)) # left, right, bottom, top
-        self.im_norm.set_data(img_norm)
-        self.im_norm.figure.canvas.draw_idle()
+        if self.mode == 'raw':
+            self.im_norm.set_extent((0,img_norm.shape[1],img_norm.shape[0],0)) # left, right, bottom, top
+            self.im_norm.set_data(img_norm)
+            self.im_norm.figure.canvas.draw_idle()
         
     def previous(self,_event):
         self.img_counter = self.img_counter-1
         img_index = self.img_counter%self.n_img
         self.current_fp = self.rgb_fp[img_index]
 
-        cap = mutils.import_captures(self.current_fp)
-        img, img_norm = aligned_capture(cap)
+        if self.mode == 'raw':
+            cap = mutils.import_captures(self.current_fp)
+            img, img_norm = aligned_capture(cap)
+        
+        elif self.mode == 'rgb':
+            img = np.asarray(Image.open(self.current_fp))
         
         # img = np.asarray(Image.open(self.current_fp))
         # img = Image.open(self.current_fp)
@@ -273,22 +307,31 @@ class LineBuilder:
         self.im.set_data(img)
         self.im.figure.canvas.draw_idle()
 
-        self.im_norm.set_extent((0,img_norm.shape[1],img_norm.shape[0],0)) # left, right, bottom, top
-        self.im_norm.set_data(img_norm)
-        self.im_norm.figure.canvas.draw_idle()
+        if self.mode == 'raw':
+            self.im_norm.set_extent((0,img_norm.shape[1],img_norm.shape[0],0)) # left, right, bottom, top
+            self.im_norm.set_data(img_norm)
+            self.im_norm.figure.canvas.draw_idle()
     
     def submit(self,_expression):
         """
         allows user to jump directly to an image index
         """
-        img_index = int(_expression)
-        # evaluate expression and update image index
-        self.img_counter = img_index%self.n_img
-        self.current_fp = self.rgb_fp[self.img_counter]
+        if self.mode == 'raw':
+            img_index = int(_expression)
+            # evaluate expression and update image index
+            self.img_counter = img_index%self.n_img
+            self.current_fp = self.rgb_fp[self.img_counter]
 
-        # update images
-        cap = mutils.import_captures(self.current_fp)
-        img, img_norm = aligned_capture(cap)
+            # update images
+            cap = mutils.import_captures(self.current_fp)
+            img, img_norm = aligned_capture(cap)
+        
+        elif self.mode == 'rgb':
+            fn = splitext(_expression)[0] #split any extension
+            # evaluate expression and update image index
+            self.img_counter = [i for i, fp in enumerate(self.rgb_fp) if fn in fp][0]
+            self.current_fp = self.rgb_fp[self.img_counter]
+            img = np.asarray(Image.open(self.current_fp))
 
         img_line = self.current_fp.split('IMG_')[1][:4] #get the current image line
         self.fig.suptitle('Select T,W,TG, WG, S areas\n{}\nImage Index {}'.format(self.current_fp,img_line))
@@ -297,9 +340,10 @@ class LineBuilder:
         self.im.set_data(img)
         self.im.figure.canvas.draw_idle()
 
-        self.im_norm.set_extent((0,img_norm.shape[1],img_norm.shape[0],0)) # left, right, bottom, top
-        self.im_norm.set_data(img_norm)
-        self.im_norm.figure.canvas.draw_idle()
+        if self.mode == 'raw':
+            self.im_norm.set_extent((0,img_norm.shape[1],img_norm.shape[0],0)) # left, right, bottom, top
+            self.im_norm.set_data(img_norm)
+            self.im_norm.figure.canvas.draw_idle()
 
         # clear all bboxes
         for k in self.categories:
@@ -313,54 +357,104 @@ class LineBuilder:
             getattr(self,k+'_patch').set_width(w)
             getattr(self,k+'_line').figure.canvas.draw_idle()
 
+    def on_close(self,_event):
+        #create a new dir to store plot images
+        plot_dir = join(getcwd(),"QAQC_relabel")
+        if not exists(plot_dir):
+            mkdir(plot_dir)
+        
+        last_img = splitext(basename(self.current_fp))[0]
+        with open(join(plot_dir,'last_image.txt'),'w') as cf:
+            cf.write(last_img)
+
 def draw_sunglint_correction(fp_store):
-    # initialise plot
-    fig, axes = plt.subplots(1,2,figsize=(15,8))
-
-    # import files
-    rgb_fp = [join(fp_store,f) for f in sorted(listdir(fp_store)) if f.endswith("1.tif")]
-    # go to the last processed image
-    img_counter = get_current_img_counter(fp_store)
-
-    cap = mutils.import_captures(rgb_fp[img_counter])
-    global warp_matrices
-    global cropped_dimensions
-    warp_matrices = cap.get_warp_matrices()
-    cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
-
-    img, img_norm = aligned_capture(cap)
-    im = axes[0].imshow(img)
-    im_norm = axes[1].imshow(img_norm)
-    axes[0].set_title('True RGB')
-    axes[1].set_title('Normalised RGB')
-    for ax in axes:
-        ax.axis('off')
-    
-
-    # set title
-    img_line = rgb_fp[img_counter].split('IMG_')[1][:4]
-    fig.suptitle('Select T,W,TG, WG, S areas\n{}\nImage Index {}'.format(rgb_fp[img_counter],img_line))
+    if 'QAQC_plots' in fp_store:
+        mode = 'rgb'
+    else:
+        mode = 'raw'
 
     # initialise categories
     button_names = ['turbid_glint','water_glint','turbid','water','shore']
     
     # intialise colours
     colors = ['orange','cyan','saddlebrown','blue','yellow']
+
+    # import files
+    rgb_fp = [join(fp_store,f) for f in sorted(listdir(fp_store)) if (f.endswith("1.tif") and mode == 'raw') or (f.endswith("1.png") and mode == 'rgb')]
+    # go to the last processed image
+    img_counter = get_current_img_counter(fp_store,mode)
     
     # initialise dictionary to store stuff
     dict_builder = {b:None for b in button_names}
     
-    # add to plot
-    for button,c in zip(button_names,colors):
-        line_category, = axes[1].plot(0,0,"o",c=c)
-        rect = patches.Rectangle((0, 0), 10, 10, linewidth=1, edgecolor=c, facecolor='none')
-        patch = axes[1].add_patch(rect)
-        dict_builder[button] = {'line':line_category,'patch':patch}
+    if mode == 'raw':
+        # initialise plot
+        fig, axes = plt.subplots(1,2,figsize=(15,8))
 
-    # initialise LineBuilder
-    linebuilder = LineBuilder(dict_builder,fig,axes,im,im_norm,rgb_fp,img_counter)
+        cap = mutils.import_captures(rgb_fp[img_counter])
+        global warp_matrices
+        global cropped_dimensions
+        warp_matrices = cap.get_warp_matrices()
+        cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
 
-    plt.subplots_adjust(bottom=0.2,right=0.8)
+        img, img_norm = aligned_capture(cap)
+        im = axes[0].imshow(img)
+        im_norm = axes[1].imshow(img_norm)
+        axes[0].set_title('True RGB')
+        axes[1].set_title('Normalised RGB')
+        for ax in axes:
+            ax.axis('off')
+        
+        # set title
+        img_line = rgb_fp[img_counter].split('IMG_')[1][:4]
+        fig.suptitle('Select T,W,TG, WG, S areas\n{}\nImage Index {}'.format(rgb_fp[img_counter],img_line))
+        
+        # add to plot
+        for button,c in zip(button_names,colors):
+            line_category, = axes[1].plot(0,0,"o",c=c)
+            rect = patches.Rectangle((0, 0), 10, 10, linewidth=1, edgecolor=c, facecolor='none')
+            patch = axes[1].add_patch(rect)
+            dict_builder[button] = {'line':line_category,'patch':patch}
+
+        # initialise LineBuilder
+        linebuilder = LineBuilder(dict_builder,fig,axes,im,im_norm,rgb_fp,img_counter,mode)
+        plt.subplots_adjust(bottom=0.2,right=0.8)
+
+        # add text box
+        textbox_ax = plt.axes([0.2, 0.15, 0.3, 0.075])
+        text_box = TextBox(textbox_ax, "IMG_index", textalignment="center")
+        text_box.on_submit(linebuilder.submit)
+        text_box.set_val(f"{img_counter}")
+
+    elif mode == 'rgb':
+        # initialise plot
+        fig, axes = plt.subplots(figsize=(15,10))
+        fn = rgb_fp[img_counter]
+        img = np.asarray(Image.open(fn))
+        im = axes.imshow(img)
+        axes.set_title('True RGB')
+        axes.axis('off')
+        # set title
+        img_line = fn.split('IMG_')[1][:4]
+        fig.suptitle('Check T,W,TG, WG, S areas\n{}\nImage Index {}'.format(fn,img_line))
+
+        # add to plot
+        for button,c in zip(button_names,colors):
+            line_category, = axes.plot(0,0,"o",c=c)
+            rect = patches.Rectangle((0, 0), 10, 10, linewidth=1, edgecolor=c, facecolor='none')
+            patch = axes.add_patch(rect)
+            dict_builder[button] = {'line':line_category,'patch':patch}
+
+        # initialise LineBuilder
+        linebuilder = LineBuilder(dict_builder,fig,axes,im,None,rgb_fp,img_counter,mode)
+        plt.subplots_adjust(bottom=0.2,right=0.8)
+
+        # add text box
+        textbox_ax = plt.axes([0.2, 0.15, 0.3, 0.05])
+        text_box = TextBox(textbox_ax, "Filename", textalignment="center")
+        text_box.on_submit(linebuilder.submit)
+        text_box.set_val(f"{basename(fn)}")
+    
     #reset button
     breset_ax = plt.axes([0.2, 0.05, 0.1, 0.075]) #left,bottom, width, height
     breset = Button(breset_ax, 'Reset')
@@ -383,14 +477,7 @@ def draw_sunglint_correction(fp_store):
     buttons = [Button(a,name) for a,name in zip(axes_buttons,button_names)]
     for k,button in zip(button_names,buttons):
         button.on_clicked(getattr(linebuilder,k)) 
-    # add text box
-    textbox_ax = plt.axes([0.2, 0.15, 0.3, 0.075])
-    text_box = TextBox(textbox_ax, "IMG_index", textalignment="center")
-    text_box.on_submit(linebuilder.submit)
-    text_box.set_val(f"{img_counter}")
-
     plt.show()
-
 
 if __name__ == '__main__':
     
