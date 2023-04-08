@@ -5,7 +5,7 @@ import micasense.imageutils as imageutils
 import micasense.plotutils as plotutils
 import os, glob
 import json
-import tqdm
+from tqdm import tqdm
 import pickle #This library will maintain the format as well
 import importlib
 import radiometric_calib_utils
@@ -139,7 +139,7 @@ class VerifyBboxes:
                         fig, axes = plt.subplots(ceil(show_n/2),2,figsize=figsize)
                         img_dict = {i:img_dict[i] for i in list(images_names)[:show_n]}
                     
-                    for (image_name,bboxes),ax in zip(img_dict.items(),axes.flatten()):
+                    for (image_name,bboxes),ax in tqdm(zip(img_dict.items(),axes.flatten())):
                         current_fp = os.path.join(flight_fp,image_name)
                         cap = mutils.import_captures(current_fp)
                         rgb_image = mutils.aligned_capture_rgb(cap, warp_matrices, cropped_dimensions, normalisation=True)
@@ -162,13 +162,13 @@ class VerifyBboxes:
             if not os.path.exists(plot_dir):
                 os.mkdir(plot_dir)
 
-            for flight_fp, img_dict in store_dict.items():
+            for flight_fp, img_dict in tqdm(store_dict.items(),desc="Flights"):
                 images_names = list(img_dict)
                 n_images = len(images_names)
                 if n_images > 0:
                     current_fp = os.path.join(flight_fp,images_names[0])
                     warp_matrices, cropped_dimensions = get_warp_matrices(current_fp)
-                    for image_name,bboxes in img_dict.items():
+                    for image_name,bboxes in tqdm(img_dict.items(),desc="Images"):
                         current_fp = os.path.join(flight_fp,image_name)
                         cap = mutils.import_captures(current_fp)
                         rgb_image = mutils.aligned_capture_rgb(cap, warp_matrices, cropped_dimensions, normalisation=False)
@@ -181,7 +181,7 @@ class VerifyBboxes:
                         fig = plt.figure(figsize=(rgb_image.shape[1]/dpi,rgb_image.shape[0]/dpi))
                         ax = fig.add_axes([0, 0, 1, 1])
                         ax.imshow(rgb_image, interpolation='nearest')
-                        print(rgb_image.shape)
+                        # print(rgb_image.shape)
                         for categories, bbox in bboxes.items():
                             coord, w, h = mutils.bboxes_to_patches(bbox)
                             rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor=self.color_mapping[categories], facecolor='none')
