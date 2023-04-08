@@ -129,6 +129,7 @@ class LineBuilder:
 
         # self.cid = fig.canvas.mpl_connect('button_press_event', self)
         self.cid = fig.canvas.mpl_connect('button_press_event', self)
+        self.close_figure = fig.canvas.mpl_connect('close_event', self.on_close)
         self.fig = fig
         self.axes = axes
         self.im = im
@@ -182,7 +183,7 @@ class LineBuilder:
 
     def reset(self, _event):
         """clear all points, lines and patches."""
-        self.save_counter = self.img_counter
+        self.save_counter = self.img_counter%self.n_img
         for k in self.categories:
             setattr(self, k+'_x', [])
             setattr(self, k+'_y', [])
@@ -283,6 +284,9 @@ class LineBuilder:
             self.im_norm.set_extent((0,img_norm.shape[1],img_norm.shape[0],0)) # left, right, bottom, top
             self.im_norm.set_data(img_norm)
             self.im_norm.figure.canvas.draw_idle()
+
+        if self.img_counter == self.n_img-1:
+            self.fig.suptitle('END OF IMAGES. CONGRATULATIONS! STOP LABELLING AFTER THIS!')
         
     def previous(self,_event):
         self.img_counter = self.img_counter-1
@@ -381,13 +385,13 @@ def draw_sunglint_correction(fp_store):
 
     # import files
     rgb_fp = [join(fp_store,f) for f in sorted(listdir(fp_store)) if (f.endswith("1.tif") and mode == 'raw') or (f.endswith("1.png") and mode == 'rgb')]
-    # go to the last processed image
-    img_counter = get_current_img_counter(fp_store,mode)
     
     # initialise dictionary to store stuff
     dict_builder = {b:None for b in button_names}
     
     if mode == 'raw':
+        # go to the last processed image
+        img_counter = get_current_img_counter(fp_store,mode)
         # initialise plot
         fig, axes = plt.subplots(1,2,figsize=(15,8))
 
@@ -427,6 +431,8 @@ def draw_sunglint_correction(fp_store):
         text_box.set_val(f"{img_counter}")
 
     elif mode == 'rgb':
+        # go to the last processed image
+        img_counter = get_current_img_counter(rgb_fp,mode)
         # initialise plot
         fig, axes = plt.subplots(figsize=(15,10))
         fn = rgb_fp[img_counter]
