@@ -1,1 +1,1 @@
-{"D:/EPMC_flight/1stSur6Apr/F1/RawImg\\IMG_0005_1.tif": {"turbid_glint": null, "water_glint": [[5, 394], [124, 491]], "turbid": null, "water": [[829, 252], [899, 332]], "shore": [[250, 717], [358, 809]]}}
+{"C:/Users/PAKHUIYING/Documents/sunglint_correction/1stSur6Apr/F1/RawImg\\IMG_0005_1.tif": {"turbid_glint": null, "water_glint": [[5, 394], [124, 491]], "turbid": null, "water": [[829, 252], [899, 332]], "shore": [[250, 717], [358, 809]]}}

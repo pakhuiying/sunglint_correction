@@ -79,7 +79,6 @@ def get_rgb(im_aligned, normalisation = True, plot=True):
     return im_display
     
 
-
 def import_captures(current_fp):
     """
     :param current_fp (str): filepath of micasense raw image IMG_****_1.tif
@@ -220,3 +219,32 @@ def get_saved_bboxes_complement():
             shutil.copyfile(c_fn, c_fn_copy)
     
     return saved_bboxes_complement
+
+def assign_new_parent_dir(panel_fp,parent_dir, split_iter=3):
+    """" 
+    :param panel_fp (dict): data loaded from rcu.load_panel_fp(r"saved_data\panel_fp.json")
+    :param parent_dir (str): new parent_dir to replace with
+    :param split_iter (int): iterations to split the os.path to get to the parent_directory
+    this function is meant to import panel images from user's local directory even though fp in panel_fp belongs to another platform.
+    in that way, the user do not have to search for all the panel images in their local machine as it will be very time consuming
+    """
+    panel_fp_dict = dict()
+    for k,v in panel_fp.items():
+        fp_temp = k
+        dirs = []
+        # split path
+        for i in range(split_iter):
+            prev_dir, next_dir = os.path.split(fp_temp)
+            dirs.append(next_dir)
+            fp_temp = prev_dir
+
+        new_parent_dir = os.path.join(parent_dir,*reversed(dirs)) #* is a splat operator to make all items in list as arguments
+        capture_list = []
+        for capture in v:
+            img_fp_list = []
+            for img_fp in capture:
+                img_fp_list.append(img_fp.replace(k,new_parent_dir))
+            capture_list.append(img_fp_list)
+        panel_fp_dict[new_parent_dir] = capture_list
+    
+    return panel_fp_dict

@@ -1,1 +1,1 @@
-{"D:/EPMC_flight/2ndSur28Apr/F1/RawImg\\IMG_0001_1.tif": {"turbid_glint": null, "water_glint": null, "turbid": null, "water": null, "shore": [[119, 210], [178, 247]]}}
+{"C:/Users/PAKHUIYING/Documents/sunglint_correction/2ndSur28Apr/F1/RawImg\\IMG_0001_1.tif": {"turbid_glint": null, "water_glint": null, "turbid": null, "water": null, "shore": [[119, 210], [178, 247]]}}
