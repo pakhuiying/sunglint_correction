@@ -110,7 +110,7 @@ class VerifyBboxes:
         return store_dict
 
     
-    def plot_bboxes(self,show_n = 6,figsize=(8,20),save = False):
+    def plot_bboxes(self,show_n = 6,figsize=(8,20),save = False,dpi=200):
         """ 
         :param dir (str): directory of where all the bboxes (.txt) are stored i.e. saved_bboxes/
         :param show_n (int): show how many plots. if number of images exceeds show_n, plot only show_n
@@ -178,22 +178,27 @@ class VerifyBboxes:
                         fn = fn.replace('.tif','')
                         full_fn = os.path.join(plot_dir,fn)
                         # plot
-                        fig, ax = plt.subplots()
-                        ax.imshow(rgb_image)
+                        fig = plt.figure(figsize=(rgb_image.shape[1]/dpi,rgb_image.shape[0]/dpi))
+                        ax = fig.add_axes([0, 0, 1, 1])
+                        ax.imshow(rgb_image, interpolation='nearest')
+                        print(rgb_image.shape)
                         for categories, bbox in bboxes.items():
                             coord, w, h = mutils.bboxes_to_patches(bbox)
                             rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor=self.color_mapping[categories], facecolor='none')
                             patch = ax.add_patch(rect)
-                            ax.text(coord[0],coord[1]+40,categories,bbox={'facecolor': 'white', 'alpha': 0.35},fontsize=7)
-                        ax.set_title(f'True RGB ({fn})')
+                            ax.text(coord[0],coord[1]+40,categories,bbox={'facecolor': self.color_mapping[categories], 'alpha': 0.35},fontsize=7)
+                        # ax.set_title(f'True RGB ({fn})')
                         ax.axis('off')
-                        ax.legend(lines,labels,loc='center left',bbox_to_anchor=(1.0, 0.5))
-                        plt.tight_layout()
+                        # ax.legend(lines,labels,loc='center left',bbox_to_anchor=(1.0, 0.5))
+                        # plt.tight_layout()
                         # plt.show()
                         #save plots
-                        fig.savefig('{}.png'.format(full_fn))
+                        
+                        # fig.set_size_inches(rgb_image.shape[1]/dpi,rgb_image.shape[0]/dpi)
+                        # plt.imsave(fname='{}.png'.format(full_fn),arr=rgb_image,format='png')
+                        fig.savefig('{}.png'.format(full_fn),dpi=dpi)
                         plt.close() # to not show any plots
-
+            
 # TODO: refactor the entire code below, by including radiometric correction. to ensure that spectral info from different env conditions are consistent
 # TODO: include code for
             # - undistorted image,
