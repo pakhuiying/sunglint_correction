@@ -199,26 +199,23 @@ def get_all_dir(fp,iter=3):
         fp_temp = base_fn
     return '_'.join(reversed(sub_dir_list))
 
-def get_saved_bboxes_complement():
+def get_bboxes_complement(dir,dir_sub,target_dir=None):
     """
-    iterate through all the saved_bboxes files and check if there is a corresponding saved_plots file, if not, return the saved_bboxes file
+    :param dir (str): directory with the bigger set of data, and the location of where to copy the files from
+    :param dir_sub (str): subset of dir
+    :param target_dir (str): target_directory to copy files, location of where to copy the files to
     """
-    store_dir = os.path.join(os.getcwd(),"saved_bboxes_complement")
-    if not os.path.exists(store_dir):
-        os.mkdir(store_dir)
-
-    saved_bboxes_complement = []
-    for i in sorted(os.listdir(r"saved_bboxes")):
-        saved_plots_dir = r"saved_plots"
-        fn = i.replace('.txt','.png')
-        saved_plots_fn = os.path.join(saved_plots_dir,fn)
-        if not os.path.exists(saved_plots_fn):
-            c_fn = os.path.join(r"saved_bboxes",i)
-            saved_bboxes_complement.append(c_fn)
-            c_fn_copy = os.path.join(store_dir,i)
-            shutil.copyfile(c_fn, c_fn_copy)
-    
-    return saved_bboxes_complement
+    qaqc_plots = [os.path.splitext(i)[0] for i in os.listdir(dir_sub)]
+    saved_bboxes = [os.path.splitext(i)[0] for i in os.listdir(dir)]
+    complementary_bboxes = set(saved_bboxes).difference(set(qaqc_plots))
+    print(len(complementary_bboxes))
+    for i in complementary_bboxes:
+        fn = '{}.txt'.format(i)
+        original_fn = os.path.join(dir,fn)
+        target_fn = os.path.join(target_dir,fn)
+        shutil.copyfile(original_fn,target_fn)
+        
+    return list(complementary_bboxes)
 
 def assign_new_parent_dir(panel_fp,parent_dir, split_iter=3):
     """" 
