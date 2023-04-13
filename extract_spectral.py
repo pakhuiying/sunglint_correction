@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.lines import Line2D
 from matplotlib.collections import LineCollection
+from matplotlib.gridspec import GridSpec
 import numpy as np
 from math import ceil
 
@@ -110,11 +111,12 @@ class VerifyBboxes:
         return store_dict
 
     
-    def plot_bboxes(self,show_n = 6,figsize=(8,20),save = False,dpi=200):
+    def plot_bboxes(self,show_n = 6,figsize=(8,20),save = False,dpi=200, plot_dir = None):
         """ 
-        :param dir (str): directory of where all the bboxes (.txt) are stored i.e. saved_bboxes/
         :param show_n (int): show how many plots. if number of images exceeds show_n, plot only show_n
         :param save (bool): save individual images if save is True. images are saved in folder 'QAQC_plots'
+        :param dpi (int): dots per inch, determines the resolution of the image saved
+        :param plot_dir (str): directory to save the QAQC_plots
         """
         store_dict = self.store_bboxes()
         # add legends
@@ -157,10 +159,15 @@ class VerifyBboxes:
                     plt.show()
         
         else:
-            #create a new dir to store plot images
-            plot_dir = os.path.join(os.getcwd(),"QAQC_plots")
-            if not os.path.exists(plot_dir):
-                os.mkdir(plot_dir)
+            if plot_dir is None:
+                #create a new dir to store plot images
+                plot_dir = os.path.join(os.getcwd(),"QAQC_plots")
+                if not os.path.exists(plot_dir):
+                    os.mkdir(plot_dir)
+            else:
+                plot_dir = os.path.join(plot_dir,"QAQC_plots")
+                if not os.path.exists(plot_dir):
+                    os.mkdir(plot_dir)
 
             for flight_fp, img_dict in tqdm(store_dict.items(),desc="Flights"):
                 images_names = list(img_dict)
@@ -200,52 +207,32 @@ class VerifyBboxes:
                         plt.close() # to not show any plots
             
 # TODO: refactor the entire code below, by including radiometric correction. to ensure that spectral info from different env conditions are consistent
-# TODO: include code for
-            # - undistorted image,
-            # - radiometrically calibrated using calibration panel, 
-            # - radiometrically corrected by applying the correction factor
-            # - band aligned and cropped
-class ExtractSpectralIndividual:
-    # def __init__(self, parent_dir,img_fp,img_bboxes,warp_matrices=None, cropped_dimensions=None):
-    #     """ 
-    #     :param parent_dir (str): folder which contains raw images (keys of store_bboxes()) e.g. F:/surveys_10band/10thSur24Aug/F1/RawImg
-    #     :param img_fp (str): image name e.g. 'IMG_0004_1.tif'
-    #     :param img_bboxes (dict): bboxes of corresponding img_fp. 
-    #         keys are categories e.g. turbid_glint, turbid, water_glint, water and shore, and values are the corresponding bboxes
-    #     :param warp_matrices (list of arrays): to align band images
-    #     :param cropped_dimensions (tuple): to cropp images for band images alignment
-    #     returns multispectral reflectance (im_aligned), and bboxes of categories
-    #     """
-    #     self.parent_dir = parent_dir
-    #     self.img_fp = img_fp
-    #     self.img_bboxes = img_bboxes
-    #     self.warp_matrices = warp_matrices
-    #     self.cropped_dimensions = cropped_dimensions
-    #     self.im_aligned, self.bboxes = self.get_multispectral_bboxes()
-    #     # initialise categories
-    #     self.button_names = ['turbid_glint','water_glint','turbid','water','shore']
-    #     # intialise colours
-    #     self.colors = ['orange','cyan','saddlebrown','blue','yellow']
-    #     self.color_mapping = {categories:colors for categories,colors in zip(self.button_names,self.colors)}
-    #     # import wavelengths for each band
-    #     wavelengths = mutils.sort_bands_by_wavelength()
-    #     self.wavelength_dict = {i[0]:i[1] for i in wavelengths}
-    #     self.n_bands = len(wavelengths)
-    #     self.wavelengths_idx = np.array([i[0] for i in wavelengths])
-    #     self.wavelengths = np.array([i[1] for i in wavelengths])
-    #     # aligning band images
-    #     self.warp_mode = cv2.MOTION_HOMOGRAPHY
-    #     self.img_type = "reflectance"
-    def __init__(self,im_aligned, bboxes):
+class ReflectanceImage:
+    def __init__(self, cap, warp_matrices=None, cropped_dimensions=None):
         """
-        :param im_aligned (np.ndarray) with dims mxnxc, a multispectral reflectance image which has been
-            - undistorted image,
-            - radiometrically calibrated using calibration panel, 
-            - radiometrically corrected by applying the correction factor
-            - band aligned and cropped
+        :param cap (capture object):
+        :param calibration_curve (dict): dls_panel_irr_calibration loaded from mutils.load_pickle(r"saved_data\dls_panel_irr_calibration.ob")
+        :param warp_matrices (list of arrays): for band alignment
+        :param cropped_dimensions (tuple): for cropping images after band alignment
+        # - undistorted image,
+        # - radiometrically calibrated using calibration panel, 
+        # - radiometrically corrected by applying the correction factor
+        # - band aligned and cropped
         """
-        self.im_aligned = im_aligned
-        self.bboxes = bboxes
+        self.cap = cap
+        self.warp_matrices = warp_matrices
+        self.cropped_dimensions = cropped_dimensions
+        self.warp_mode = cv2.MOTION_HOMOGRAPHY
+        self.interpolation_mode=cv2.INTER_LANCZOS4
+        self.img_type = "reflectance"
+        try:
+            dls_panel_irr_calibration = mutils.load_pickle(r"saved_data\dls_panel_irr_calibration.ob")
+            self.calibration_curve = dls_panel_irr_calibration
+        except:
+            self.calibration_curve = None
+        if warp_matrices is None and cropped_dimensions is None:
+            self.warp_matrices = self.cap.get_warp_matrices()
+            self.cropped_dimensions,_ = imageutils.find_crop_bounds(self.cap,self.warp_matrices)
         # initialise categories
         self.button_names = ['turbid_glint','water_glint','turbid','water','shore']
         # intialise colours
@@ -259,79 +246,65 @@ class ExtractSpectralIndividual:
         self.wavelengths = np.array([i[1] for i in wavelengths])
 
     @classmethod
-    def from_bbox(cls,bbox_file):
+    def get_cap_from_filename(cls, image_names):
         """
-        bbox_file (str): filepath of one of the files in saved_bboxes
-        returns im_aligned, bboxes
+        :param image_names (list of str): filenames of images
         """
-        warp_mode = cv2.MOTION_HOMOGRAPHY
-        img_type = "reflectance"
+        image_names = mutils.order_bands_from_filenames(image_names)
+        cap = capture.Capture.from_filelist(image_names)
+        return cls(cap)
+    
+    def get_calibrated_corrected_reflectance(self):
+        """
+        get radiometrically corrected and calibrated reflectance image
+        returns list of array of reflectance in band order i.e. band 1,2,3,4,5,6,7,8,9,10
+        """
+        if self.calibration_curve is not None:
+            IC = rcu.ImageCorrection(self.cap,self.calibration_curve)
+            return IC.corrected_image()
+        else:
+            self.cap.undistorted_reflectance(self.cap.dls_irradiance())
 
-        with open(bbox_file, 'r') as fp:
-            data = json.load(fp)
-        fp = list(data)[0]
-        bboxes = data[fp]
+    def get_aligned_reflectance(self):
+        """
+        align band images
+        outputs aligned and cropped reflectance image
+        """
+        reflectance_image = self.get_calibrated_corrected_reflectance() #should be a list of arrays
+        height, width = reflectance_image[0].shape[0], reflectance_image[0].shape[1]
+        im_aligned = np.zeros((height,width,len(self.warp_matrices)), dtype=np.float32 )
 
-        # check if filepath in bbox_file exists locally
-        if not os.path.exists(fp):
-            raise IOError("No files provided. Check your file paths.")
+        for i in range(len(self.warp_matrices)):
+            img = reflectance_image[i]
+            im_aligned[:,:,i] = cv2.warpPerspective(img,
+                                                self.warp_matrices[i],
+                                                (width,height),
+                                                flags=self.interpolation_mode + cv2.WARP_INVERSE_MAP)
         
-        cap = mutils.import_captures(fp)
-        warp_matrices = cap.get_warp_matrices()
-        cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
-        im_aligned = imageutils.aligned_capture(cap, warp_matrices, warp_mode, cropped_dimensions, None, img_type=img_type)
-        return cls(im_aligned, bboxes)
-
-
-    def get_multispectral_bboxes(self):
-        """ 
-        :param parent_dir (str): folder which contains raw images (keys of store_bboxes()) e.g. F:/surveys_10band/10thSur24Aug/F1/RawImg
-        :param img_fp (str): image name e.g. 'IMG_0004_1.tif'
-        :param img_bboxes (dict): keys are categories e.g. turbid_glint, turbid, water_glint, water and shore, and values are the corresponding bboxes
-        :param warp_matrices (list of arrays): to align band images
-        :param cropped_dimensions (tuple): to cropp images for band images alignment
-        returns multispectral reflectance (im_aligned), and bboxes of categories associated to the image
+        (left, top, w, h) = tuple(int(i) for i in self.cropped_dimensions)
+        im_cropped = im_aligned[top:top+h, left:left+w][:]
+        return im_cropped
+    
+    def plot_bboxes(self,bboxes,**kwargs):
         """
-        fp = os.path.join(self.parent_dir,self.img_fp)
-        cap = mutils.import_captures(fp)
-        if warp_matrices is None and cropped_dimensions is None:
-            warp_matrices = cap.get_warp_matrices()
-            cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
-
-        im_aligned = imageutils.aligned_capture(cap, warp_matrices, self.warp_mode, cropped_dimensions, None, img_type=self.img_type)
-        # if img_bboxes is None:
-        #     img_bboxes = self.store_bboxes()
-        bboxes = self.img_bboxes[self.parent_dir][self.img_fp]
-        return im_aligned, bboxes
-
-    def plot_multispectral(self):
-        """ 
-        :param parent_dir (str): folder which contains raw images (keys of store_bboxes()) e.g. F:/surveys_10band/10thSur24Aug/F1/RawImg
-        :param img_fp (str): image name e.g. 'IMG_0004_1.tif'
-        :param img_bboxes (dict): keys are categories e.g. turbid_glint, turbid, water_glint, water and shore, and values are the corresponding bboxes
-        :param warp_matrices (list of arrays): to align band images
-        :param cropped_dimensions (tuple): to cropp images for band images alignment
-        returns a plot of the rgb_image, drawn bboxes, and spectral reflectance (fractional reflectances)
+        :param bboxes (dict): bboxes of corresponding img_fp. 
+            keys are categories e.g. turbid_glint, turbid, water_glint, water and shore, and values are the corresponding bboxes
         """
-        # im_aligned, bboxes = self.get_multispectral_bboxes()
-        
-        n_cats = len(list(bboxes)) # number of categories based on bboxes drawn
+        im_aligned = self.get_aligned_reflectance()
 
-        # initialise plot
-        fig = plt.figure(figsize=(6, 2*(1+n_cats)), layout="constrained")
-        spec = fig.add_gridspec(1+n_cats, 2) #first row is for the image
+        # number of labelled cateories
+        n_cats = len(list(bboxes))
+        fig, axes = plt.subplots(n_cats+1,2,figsize=kwargs['figsize'])
         # plot rgb
         rgb_image = mutils.get_rgb(im_aligned, normalisation = False, plot=False)
-        ax0 = fig.add_subplot(spec[0, 0])
-        ax0.imshow(rgb_image)
-        ax0.set_title('True RGB')
-        ax0.set_axis_off()
         # plot normalised rgb
         rgb_image_norm = mutils.get_rgb(im_aligned, normalisation = True, plot=False)
-        ax1 = fig.add_subplot(spec[0, 1])
-        ax1.imshow(rgb_image_norm)
-        ax1.set_title('Normalised RGB')
-        ax1.set_axis_off()
+        axes[0,0].imshow(rgb_image)
+        axes[0,0].set_title('True RGB')
+        axes[0,1].imshow(rgb_image_norm)
+        axes[0,1].set_title('Normalised RGB')
+        for ax in axes[0,:]:
+            ax.axis('off')
 
         for i, (category,bbox) in enumerate(bboxes.items()):
             ((x1,y1),(x2,y2)) = bbox
@@ -339,11 +312,7 @@ class ExtractSpectralIndividual:
                 x1, x2 = x2, x1
             if y1 > y2:
                 y1,y2 = y2, y1
-
             ax_idx = i+1 #axis index
-            ax_im = fig.add_subplot(spec[ax_idx, 0]) # axis for adding cropped image based on bbox
-            ax_line = fig.add_subplot(spec[ax_idx, 1]) # axis for adding spectral reflectances
-            
             # crop rgb image based on bboxes drawn
             im_cropped = rgb_image[y1:y2,x1:x2,:]
             # get multispectral reflectances from bboxes
@@ -353,31 +322,33 @@ class ExtractSpectralIndividual:
             wavelength_flatten = spectral_flatten[:,self.wavelengths_idx]
             wavelength_mean = np.mean(wavelength_flatten,axis=0)
             wavelength_var = np.sqrt(np.var(wavelength_flatten,axis=0)) #std dev
-            
             # add patches to plots
             coord, w, h = mutils.bboxes_to_patches(bbox)
             c = self.color_mapping[category]
             rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor=c, facecolor='none')
-            patch = ax0.add_patch(rect)
+            patch = axes[0,0].add_patch(rect)
             
-            ax_im.imshow(im_cropped)
-            ax_im.set_title(category)
-            ax_im.set_axis_off()
-            ax_line.plot(self.wavelengths,wavelength_mean,color=c)
-            eb = ax_line.errorbar(self.wavelengths,wavelength_mean,yerr=wavelength_var,color=c)
+            axes[ax_idx,0].imshow(im_cropped)
+            axes[ax_idx,0].set_title(category)
+            axes[ax_idx,0].set_axis_off()
+            axes[ax_idx,1].plot(self.wavelengths,wavelength_mean,color=c)
+            eb = axes[ax_idx,1].errorbar(self.wavelengths,wavelength_mean,yerr=wavelength_var,color=c)
             eb[-1][0].set_linestyle('--')
-            ax_line.set_title(f'Spectra ({category})')
-            ax_line.set_xlabel('Wavelength (nm)')
-            ax_line.set_ylabel('Reflectance')
+            axes[ax_idx,1].set_title(f'Spectra ({category})')
+            axes[ax_idx,1].set_xlabel('Wavelength (nm)')
+            axes[ax_idx,1].set_ylabel('Reflectance')
         
+        plt.tight_layout()
         plt.show()
-        
         return
-
-    def plot_multiline(self,im_aligned,bbox):
+    
+    def plot_multiline(self,bbox,**kwargs):
         """ 
+        :param bbox (tuple): bbox of glint area
         plot multispectral reflectance of the image cropped by bbox
         """
+        im_aligned = self.get_aligned_reflectance()
+
         ((x1,y1),(x2,y2)) = bbox
         if x1 > x2:
             x1, x2 = x2, x1
@@ -432,135 +403,284 @@ class ExtractSpectralIndividual:
         assert x.shape == wavelength_flatten.shape, "x and y should have the same shape"
         c = wavelength_flatten[:,-1] # select the last column which corresponds to NIR band
         
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=kwargs['figsize'])
         lc = multiline(x, wavelength_flatten, c, cmap='bwr',alpha=0.3 ,lw=2)
         ax.plot(self.wavelengths,wavelength_mean,color='yellow',label='Mean reflectance')
         axcb = fig.colorbar(lc)
-        axcb.set_label('NIR reflectance')
-        ax.set_title('Spectra of glint area')
+        axcb.set_label('Reflectance')
+        ax.set_title(kwargs['title'])
         ax.set_ylabel('Reflectance')
         ax.set_xlabel('Wavelength (nm)')
         plt.legend()
         plt.show()
         return (np.min(c),np.mean(c),np.max(c)) #where np.min(c) is the background NIR
 
-    def identify_glint(self,im_aligned,bbox,normalisation=False,percentile_threshold=90,percentile_method='nearest',mode="rgb"):
-        """ 
-        :param im_aligned (np.ndarray): 10 bands in band order i.e. band 1,2,3,4,5,6,7,8,9,10
-        :param bbox (tuples or np.ndarray): e.g. ((x1,y1),(x2,y2))
-        :param percentile_threshold (float): value between 0 and 100
-        :param normalisation (bool): whether to normalise the image. It can help with increasing the contrast to identify glint. 
-            However, non glint areas' contrast may be stretched to appear as glint which is misleading
-        :param percentile_method (str): 'linear'(continuous) or 'nearest' (discontinuous method). 
-            Note that for numpy version > 1.22, 'interpolation' argument is replaced with 'method', 'interpolation' is deprecated
-        :param mode (str): 'rgb' or 'nir' which determines what mode is used for glint detection
-            'rgb' means that all rgb bands will be used to detect glint
-            'nir' means that only nir band is only used to detect glint
-        TODO 
-            1. automate finding the percentile_threshold using CDF method
-        """
-        ((x1,y1),(x2,y2)) = bbox
+
+
+class ThresholdGlint:
+    def __init__(self, im_aligned,bbox):
+        self.im_aligned = im_aligned
+        self.bbox = bbox
+        # initialise categories
+        self.button_names = ['turbid_glint','water_glint','turbid','water','shore']
+        # intialise colours
+        self.colors = ['orange','cyan','saddlebrown','blue','yellow']
+        self.color_mapping = {categories:colors for categories,colors in zip(self.button_names,self.colors)}
+        # import wavelengths for each band
+        wavelengths = mutils.sort_bands_by_wavelength()
+        self.wavelength_dict = {i[0]:i[1] for i in wavelengths}
+        self.n_bands = im_aligned.shape[-1]
+
+    def sort_bbox(self):
+        ((x1,y1),(x2,y2)) = self.bbox
         if x1 > x2:
             x1, x2 = x2, x1
         if y1 > y2:
             y1,y2 = y2, y1
         
-        rgb_bands = [2,1,0] #668, 560, 475 nm
-        # rgb image
-        rgb_image = mutils.get_rgb(im_aligned[y1:y2,x1:x2,:],normalisation=normalisation,plot=False)
-        nrow, ncol, _ = rgb_image.shape
+        return ((x1,y1),(x2,y2))
+    def histogram_threshold(self, n_bins=200,plot=True,**kwargs):
+        """
+        :param n_bins (int): basically determines how sensitive we want the threshold to be. The larger the n_bins (the more sensitive the threshold for glint cut off)
+        :param mode (str): percentile or histogram. this determines the method for glint detection
+        """
+        ((x1,y1),(x2,y2)) = self.sort_bbox()
+        threshold_list = []
 
-        if mode == 'rgb':
-            # rgb band images
-            rgb_images = [rgb_image[:,:,i] for i in range(3)] #bands 2,1,0
-            # use percentile to identify glint threshold
-            rgb_images_flatten = [i.flatten() for i in rgb_images]
-            glint_percentile = [np.percentile(i,percentile_threshold,interpolation=percentile_method) for i in rgb_images_flatten] #get the value of the reflectance at percentile threshold
-            glint_idxes = [np.argwhere(im>p) for p,im in zip(glint_percentile,rgb_images_flatten)]
-            glint_idxes = [np.unravel_index(i,(nrow,ncol)) for i in glint_idxes]
-            # combine the indices for each band
-            unique_glint_idxes = np.unique(np.vstack([np.column_stack(i) for i in glint_idxes]),axis=0) #first column is row idx, 2nd column is col idx
-            y, x = unique_glint_idxes[:,0], unique_glint_idxes[:,1]
-            # use the combined indices to mask rgb image
-            rgb_masked = rgb_image.copy()
-            rgb_masked[y,x] = 0
+        fig, axes = plt.subplots(self.n_bands,3,figsize=kwargs['figsize'])
+        for i in range(self.n_bands):
+            band_i = self.im_aligned[y1:y2,x1:x2,i]
+            band_i_flatten = band_i.flatten()
+            axes[i,0].imshow(band_i,vmin=0,vmax=1)
+            axes[i,0].axis('off')
+            axes[i,0].set_title(f'Band {self.wavelength_dict[i]}')
+            count,bins,_ = axes[i,1].hist(band_i_flatten,bins=n_bins)
+            threshold_y = np.argmax(count)
+            threshold_x = bins[threshold_y+1] #to get the right hand range of the bins
+            threshold_list.append(threshold_x)
+            axes[i,1].axvline(threshold_x, color='r')
+            axes[i,1].text(threshold_x, threshold_y, f'{threshold_x:.3f}')
+            axes[i,1].set_title('Histogram')
+            axes[i,2].hist(band_i_flatten,n_bins, histtype='step',cumulative=True)
+            axes[i,2].set_title('ECDF')
+            axes[i,2].axvline(threshold_x, color='r')
+            axes[i,2].text(threshold_x, threshold_y, f'{threshold_x:.3f}')
 
-            fig, axes = plt.subplots(2,3,figsize=(10,5))
-            for i in range(3):
-                w = self.wavelength_dict[rgb_bands[i]]
-                glint_idx = glint_idxes[i]
-                image_copy = rgb_images[i].copy()
-                image_copy[glint_idx] = 1
-                im = axes[0,i].imshow(image_copy)
-                plt.colorbar(im,ax=axes[0,i])
-                axes[0,i].set_axis_off()
-                axes[0,i].set_title(f'{w} nm \nPercentile value ({glint_percentile[i]:.3f})')
-
-            axes[1,0].imshow(rgb_image)
-            axes[1,0].set_title('RGB image')
-            axes[1,0].set_axis_off()
-
-            axes[1,1].imshow(rgb_masked)
-            axes[1,1].set_title('RGB masked image')
-            axes[1,1].set_axis_off()
-
-            extracted_glint = rgb_image - rgb_masked
-            axes[1,2].imshow(extracted_glint)
-            axes[1,2].set_title('Glint extracted')
-            axes[1,2].set_axis_off()
-
-            fig.suptitle(f'Glint detection using {percentile_threshold}th percentile ({percentile_method})')
+        if plot is True:
             plt.tight_layout()
             plt.show()
-        
         else:
-            # NIR image to identify glint
-            NIR_band = 3
-            NIR_wavelength =self.wavelength_dict[NIR_band]
-            NIR_image = im_aligned[y1:y2,x1:x2,NIR_band]
-            nir_flattened = NIR_image.flatten()
-            glint_percentile = np.percentile(nir_flattened,percentile_threshold,interpolation=percentile_method)
-            # identify indices where NIR is higher than percentile threshold
-            glint_idxes = np.argwhere(nir_flattened>glint_percentile)
-            glint_idxes = np.unravel_index(glint_idxes,(nrow,ncol))
-            # mask images
-            rgb_masked = rgb_image.copy()
-            rgb_masked[glint_idxes] = 0
-            # mask on NIR_image
-            NIR_masked = NIR_image.copy()
-            NIR_masked[glint_idxes] = 1
-            # plot
-            fig, axes = plt.subplots(2,3,figsize=(10,5))
-            # plot NIR band
-            im = axes[0,0].imshow(NIR_image)
-            plt.colorbar(im,ax=axes[0,0])
-            axes[0,0].set_title(f'NIR image ({NIR_wavelength} nm)')
-            # plot glint detected using NIR band
-            im = axes[0,1].imshow(NIR_masked)
-            plt.colorbar(im,ax=axes[0,1])
-            axes[0,1].set_title(f'{NIR_wavelength} nm \nPercentile value ({glint_percentile:.3f})')
+            plt.close()
+        return threshold_list
+    
+    def percentile_threshold(self,n_bins=200,percentile_threshold=90,percentile_method='nearest',plot=True,**kwargs):
+        """
+        :param percentile_threshold (float): value between 0 and 100
+        :param normalisation (bool): whether to normalise the image. It can help with increasing the contrast to identify glint. 
+            However, non glint areas' contrast may be stretched to appear as glint which is misleading
+        :param percentile_method (str): 'linear'(continuous) or 'nearest' (discontinuous method). 
+            Note that for numpy version > 1.22, 'interpolation' argument is replaced with 'method', 'interpolation' is deprecated
+        """
+        ((x1,y1),(x2,y2)) = self.sort_bbox()
+        threshold_list = []
 
-            axes[1,0].imshow(rgb_image)
-            axes[1,0].set_title('RGB image')
-            axes[1,0].set_axis_off()
+        fig, axes = plt.subplots(self.n_bands,3,figsize=kwargs['figsize'])
+        for i in range(self.n_bands):
+            band_i = self.im_aligned[y1:y2,x1:x2,i]
+            band_i_flatten = band_i.flatten()
+            
+            axes[i,0].imshow(band_i,vmin=0,vmax=1)
+            axes[i,0].axis('off')
+            axes[i,0].set_title(f'Band {self.wavelength_dict[i]}')
+            
+            glint_percentile = np.percentile(band_i_flatten,percentile_threshold,interpolation=percentile_method)
+            threshold_list.append(glint_percentile)
+            axes[i,1].hist(band_i_flatten,bins=n_bins)
+            axes[i,1].axvline(glint_percentile, color='r')
+            axes[i,1].set_title(f'Histogram ({glint_percentile:.3f})')
 
-            axes[1,1].imshow(rgb_masked)
-            axes[1,1].set_title('RGB masked image')
-            axes[1,1].set_axis_off()
+            axes[i,2].hist(band_i_flatten,n_bins, histtype='step',cumulative=True)
+            axes[i,2].set_title(f'ECDF ({glint_percentile:.3f})')
+            axes[i,2].axvline(glint_percentile, color='r')
 
-            extracted_glint = rgb_image - rgb_masked
-            axes[1,2].imshow(extracted_glint)
-            axes[1,2].set_title('Glint extracted')
-            axes[1,2].set_axis_off()
-
-            # turn off all axis
-            for ax in axes.flatten():
-                ax.set_axis_off()
-            fig.suptitle(f'Glint detection using {percentile_threshold}th percentile ({percentile_method})')
+        if plot is True:
             plt.tight_layout()
             plt.show()
-        
-        # returns binary mask
-        mask = np.where(extracted_glint[:,:,1]>0,1,0)
-        return mask
+        else:
+            plt.close()
+        return threshold_list
+    
+    def mask_bands(self,threshold_list,plot=True,**kwargs):
+        """
+        :param threshold_list (list of float): where each threshold corresponds to the threshold for each band
+        threshold image given a threshold_list
+        """
+        ((x1,y1),(x2,y2)) = self.sort_bbox()
 
+        glint_idxes_list = []
+        # extracted_glint_list = []
+        # glint_masked_list = []
+
+        fig, axes = plt.subplots(self.n_bands,3,figsize=kwargs['figsize'])
+        for i in range(self.n_bands):
+            band_i = self.im_aligned[y1:y2,x1:x2,i]
+            glint_idxes = np.argwhere(band_i>threshold_list[i])
+            glint_idxes_list.append(glint_idxes)
+            glint_masked = band_i.copy()
+            glint_masked[(glint_idxes[:,0],glint_idxes[:,1])] = 0
+            glint_extracted = band_i - glint_masked
+
+            # glint_masked_list.append(glint_masked)
+            # extracted_glint_list.append(glint_extracted)
+
+            axes[i,0].imshow(band_i,vmin=0,vmax=1)
+            axes[i,0].axis('off')
+            axes[i,0].set_title(f'Band {self.wavelength_dict[i]}')
+
+            axes[i,1].imshow(glint_masked,vmin=0,vmax=1)
+            axes[i,1].axis('off')
+            axes[i,1].set_title('Glint masked')
+            
+            axes[i,2].imshow(glint_extracted,vmin=0,vmax=1)
+            axes[i,2].axis('off')
+            axes[i,2].set_title('Glint extracted')
+        
+        if plot is True:
+            plt.tight_layout()
+            plt.show()
+        else:
+            plt.close()
+
+        return glint_idxes_list#glint_masked_list,extracted_glint_list
+    
+    def spectral_unmixing(self, glint_idxes_list, plot=True):
+
+        ((x1,y1),(x2,y2)) = self.sort_bbox()
+
+        masked_im = self.mask_image(glint_idxes_list,plot=False)
+
+        rgb_mean = []
+        for i in range(3):
+            im = masked_im[:,:,i]
+            rgb_mean.append(np.mean(im[im>0]))
+        
+        rgb_inpaint = np.tile(np.array(rgb_mean),(masked_im.shape[0],masked_im.shape[1],1))
+        
+        rgb_bands = [2,1,0]
+        
+        fig = plt.figure(layout="constrained")
+        gs = GridSpec(3, 3, figure=fig)
+
+        for i, b in enumerate(rgb_bands):
+            rgb_base = rgb_inpaint.copy()
+            rgb_base[(glint_idxes_list[i][:,0],glint_idxes_list[i][:,1],b)] = self.im_aligned[y1:y2,x1:x2,i][(glint_idxes_list[i][:,0],glint_idxes_list[i][:,1])]
+            ax1 = fig.add_subplot(gs[0, i])
+            ax1.set_title(f'Glint for {self.wavelength_dict[i]} band')
+            ax1.imshow(rgb_base)
+            ax1.axis('off')
+
+        ax2 = fig.add_subplot(gs[1:, :])
+        ax2.axis('off')
+        rgb_base = rgb_inpaint.copy()
+        for i, b in enumerate(rgb_bands):
+            rgb_base[(glint_idxes_list[i][:,0],glint_idxes_list[i][:,1],b)] = self.im_aligned[y1:y2,x1:x2,i][(glint_idxes_list[i][:,0],glint_idxes_list[i][:,1])]
+        ax2.imshow(rgb_base)
+        ax2.set_title('Combined Spectral')
+        if plot is True:
+            plt.tight_layout()
+            plt.show()
+        else:
+            plt.close()
+
+        return
+
+    def mask_image(self,glint_idxes_list, plot=True):
+        """
+        :param threshold_list (list of float): where each threshold corresponds to the threshold for each band
+        threshold image given a threshold_list
+        """
+        rgb_bands = [2,1,0] #668, 560, 475 nm
+        ((x1,y1),(x2,y2)) = self.sort_bbox()
+        # concatenate glint_idxes
+        # concatenate_glint_idxes = np.unique(np.vstack([glint_idxes_list[i] for i in rgb_bands]),axis=0) #in order of band 2,1,0
+        concatenate_glint_idxes = np.unique(np.vstack(glint_idxes_list[:3]),axis=0) #in order of band 2,1,0
+        # get rgb image
+        rgb_image = np.take(self.im_aligned[y1:y2,x1:x2,:],rgb_bands,axis=2)
+        # copy of of rgb
+        rgb_image_copy = rgb_image.copy()
+        rgb_list = []
+        for i in range(len(rgb_bands)):
+            im_copy = rgb_image_copy[:,:,i]
+            im_copy[(concatenate_glint_idxes[:,0],concatenate_glint_idxes[:,1])] = 0
+            rgb_list.append(im_copy)
+        
+        rgb_masked = np.stack(rgb_list,axis=2)
+        glint_extracted = rgb_image - rgb_masked
+
+        fig, axes = plt.subplots(1,3)
+        axes[0].imshow(rgb_image)
+        axes[0].set_title('True RGB')
+        axes[1].imshow(rgb_masked)
+        axes[1].set_title('Masked RGB')
+        axes[2].imshow(glint_extracted)
+        axes[2].set_title('Glint extracted')
+        for ax in axes:
+            ax.axis('off')
+        fig.suptitle('Glint identification')
+        
+        if plot is True:
+            plt.tight_layout()
+            plt.show()
+        else:
+            plt.close()
+
+        return rgb_masked
+    
+    def plot_spectral(self,glint_idxes_list, plot=True):
+        """
+        plot spectral of masked image and extracted glint
+        """
+        ((x1,y1),(x2,y2)) = self.sort_bbox()
+
+        extracted_glint_list = []
+        glint_masked_list = []
+
+        for i in range(self.n_bands):
+            band_i = self.im_aligned[y1:y2,x1:x2,i]
+            glint_masked = band_i.copy()
+            glint_masked[(glint_idxes_list[i][:,0],glint_idxes_list[i][:,1])] = 0
+            glint_extracted = band_i - glint_masked
+
+            glint_masked_list.append(glint_masked)
+            extracted_glint_list.append(glint_extracted)
+
+        # store a list of tuple where (mean of reflectance, sd of reflctance)
+        extracted_glint_list = [(np.mean(i[i>0]), np.sqrt(np.var(i[i>0],axis=0))) for i in extracted_glint_list]
+        glint_masked_list = [(np.mean(i[i>0]), np.sqrt(np.var(i[i>0],axis=0))) for i in glint_masked_list]
+        # sort based on wavelengths in ascending manner
+        extracted_glint_list = [extracted_glint_list[i] for i in list(self.wavelength_dict)]
+        glint_masked_list = [glint_masked_list[i] for i in list(self.wavelength_dict)]
+
+        plot_statistics = {0: glint_masked_list, 1: extracted_glint_list}
+        
+        fig, axes = plt.subplots(1,2)
+        for k, v in plot_statistics.items():
+            axes[k].plot(list(self.wavelength_dict.values()), [i[0] for i in v])
+            eb = axes[k].errorbar(list(self.wavelength_dict.values()),[i[0] for i in v],yerr=[i[1] for i in v])
+            eb[-1][0].set_linestyle('--')
+
+        axes[0].set_title('Reflectance for masked RGB')
+        axes[1].set_title('Reflectance for extracted glint')
+        for ax in axes:
+            ax.set_xlabel('Wavelengths (nm)')
+            ax.set_ylabel('Reflectance')
+
+        if plot is True:
+            plt.tight_layout()
+            plt.show()
+        else:
+            plt.close()
+
+        return
+
+    
