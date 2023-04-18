@@ -24,23 +24,32 @@ from math import ceil
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from scipy.stats.stats import pearsonr
+from scipy.stats import gaussian_kde
+from scipy.ndimage import gaussian_filter
 
 class Hedley:
-    def __init__(self, im_aligned,bbox,mode="regression"):
+    def __init__(self, im_aligned,bbox,mode="regression",sigma=2,smoothing=True):
         """
         :param im_aligned (np.ndarray): band aligned and calibrated & corrected reflectance image
         :param bbox (tuple): bbox of a glint area e.g. water_glint
         :param mode (str): modes for estimating the slopes for Hedley correction (e.g. regression, least_sq, covariance,pearson)
+        :param sigma (float): smoothing sigma for images
+        :param smoothing (bool): whether to smooth images or not, due to the spatial offset in glint across diff bands
         """
         self.im_aligned = im_aligned
         if mode not in ['regression, least_sq, covariance,pearson']:
             self.mode = 'regression'
         else:
             self.mode = mode
+        self.smoothing = smoothing
         self.bbox = bbox
         self.bbox = self.sort_bbox()
         ((x1,y1),(x2,y2)) = self.bbox
         self.glint_area = self.im_aligned[y1:y2,x1:x2,:]
+        if self.smoothing is True:
+            self.im_aligned_smoothed = gaussian_filter(self.im_aligned, sigma=sigma)
+        self.sigma = sigma
+        self.glint_area_smoothed = gaussian_filter(self.glint_area, sigma=self.sigma)
         # initialise categories
         self.button_names = ['turbid_glint','water_glint','turbid','water','shore']
         # intialise colours
@@ -118,19 +127,31 @@ class Hedley:
     
         regression_slopes = dict()
         NIR_band = list(self.wavelength_dict)[-1]
-        NIR_pixels = self.glint_area[:,:,self.NIR_band].flatten().reshape(-1, 1)
+        if self.smoothing is True:
+            NIR_pixels = self.glint_area_smoothed[:,:,self.NIR_band].flatten().reshape(-1, 1)
+        else:
+            NIR_pixels = self.glint_area[:,:,self.NIR_band].flatten().reshape(-1, 1)
         self.R_min = np.percentile(NIR_pixels,5,interpolation='nearest')
 
         fig, axes = plt.subplots(self.n_bands//2,2,figsize=(10,20))
 
         for band_number,ax in zip(range(self.n_bands),axes.flatten()):
-            y = self.glint_area[:,:,band_number].flatten().reshape(-1, 1)
+            if self.smoothing is True:
+                y = self.glint_area_smoothed[:,:,band_number].flatten().reshape(-1, 1)
+            else:
+                y = self.glint_area[:,:,band_number].flatten().reshape(-1, 1)
             b_regression, intercept, lm = self.regression_slope(NIR_pixels,y)
             b_covariance = self.covariance(NIR_pixels,y)
             b_least_sq = self.least_sq(NIR_pixels,y)
             b_pearson = self.pearson(NIR_pixels,y)
             regression_slopes[band_number] = b_regression
-            ax.plot(NIR_pixels,y,'o')
+            # color scatterplot density
+            xy = np.vstack([NIR_pixels.flatten(),y.flatten()])
+            try:
+                z = gaussian_kde(xy)(xy)
+                ax.scatter(NIR_pixels,y, c=z)
+            except:
+                ax.plot(NIR_pixels,y,'o')
             r2 = r2_score(y,lm.predict(NIR_pixels))
             ax.set_title(r'Band {}: {} nm ($R^2:$ {:.3f}, N = {})'.format(band_number, self.wavelength_dict[band_number],r2,y.shape[0]))
             ax.set_xlabel(f'NIR reflectance (Band {self.wavelength_dict[NIR_band]})')
@@ -138,10 +159,12 @@ class Hedley:
             x_vals = np.linspace(np.min(NIR_pixels),np.max(NIR_pixels),50)
             y_vals = intercept + b_regression * x_vals
             ax.plot(x_vals.reshape(-1,1), y_vals.reshape(-1,1), '--')
-            ax.text(0.1,ax.get_ylim()[1]*0.8,r"$y = {:.3f}x + {:.3f}$".format(b_regression,intercept))
-            ax.text(0.1,ax.get_ylim()[1]*0.6,f"Cov: {b_covariance:.3f}")
-            ax.text(0.1,ax.get_ylim()[1]*0.4,f"Least sq: {b_least_sq:.3f}")
-            ax.text(0.1,ax.get_ylim()[1]*0.2,f"Pearson: {b_pearson:.3f}")
+            t1 = ax.text(0.1,ax.get_ylim()[1]*0.8,r"$y = {:.3f}x + {:.3f}$".format(b_regression,intercept))
+            t2 = ax.text(0.1,ax.get_ylim()[1]*0.6,f"Cov: {b_covariance:.3f}")
+            t3 = ax.text(0.1,ax.get_ylim()[1]*0.4,f"Least sq: {b_least_sq:.3f}")
+            t4 = ax.text(0.1,ax.get_ylim()[1]*0.2,f"Pearson: {b_pearson:.3f}")
+            for t in [t1,t2,t3,t4]:
+                t.set_bbox(dict(facecolor="white",alpha=0.5))
 
         if plot is True:
             plt.tight_layout()
@@ -149,19 +172,25 @@ class Hedley:
         else:
             plt.close()
 
-        return regression_slopes
+        return #regression_slopes
     
     def correction_bands(self):
         """ 
         returns a list of slope in band order i.e. 0,1,2,3,4,5,6,7,8,9
         """
         
-        NIR_pixels = self.glint_area[:,:,self.NIR_band].flatten().reshape(-1, 1)
+        if self.smoothing is True:
+            NIR_pixels = self.glint_area_smoothed[:,:,self.NIR_band].flatten().reshape(-1, 1)
+        else:
+            NIR_pixels = self.glint_area[:,:,self.NIR_band].flatten().reshape(-1, 1)
         self.R_min = np.percentile(NIR_pixels,5,interpolation='nearest')
 
         b_list = []
         for band_number in range(self.n_bands):
-            y = self.glint_area[:,:,band_number].flatten().reshape(-1, 1)
+            if self.smoothing is True:
+                y = self.glint_area_smoothed[:,:,band_number].flatten().reshape(-1, 1)
+            else:
+                y = self.glint_area[:,:,band_number].flatten().reshape(-1, 1)
             if self.mode == 'regression':
                 b,_,_ = self.regression_slope(NIR_pixels,y)
             elif self.mode == 'covariance':
@@ -189,12 +218,19 @@ class Hedley:
         fig, axes = plt.subplots(self.n_bands,2,figsize=(10,20))
         for band_number in range(self.n_bands):
             b = b_list[band_number]
-            corrected_band = hedley_c(self.im_aligned[:,:,band_number],self.im_aligned[:,:,self.NIR_band],b,self.R_min)
-            corrected_bands.append(corrected_band)
-            avg_reflectance.append(np.mean(self.glint_area[:,:,band_number]))
-            avg_reflectance_corrected.append(np.mean(corrected_band[y1:y2,x1:x2]))
-            axes[band_number,0].imshow(self.im_aligned[:,:,band_number])
-            axes[band_number,1].imshow(corrected_band)
+            if self.smoothing is True:
+                corrected_band = hedley_c(self.im_aligned_smoothed[:,:,band_number],self.im_aligned_smoothed[:,:,self.NIR_band],b,self.R_min)
+                corrected_bands.append(corrected_band)
+                avg_reflectance.append(np.mean(self.glint_area_smoothed[:,:,band_number]))
+                avg_reflectance_corrected.append(np.mean(corrected_band[y1:y2,x1:x2]))
+                axes[band_number,0].imshow(self.im_aligned_smoothed[:,:,band_number],vmin=0,vmax=1)
+            else:
+                corrected_band = hedley_c(self.im_aligned[:,:,band_number],self.im_aligned[:,:,self.NIR_band],b,self.R_min)
+                corrected_bands.append(corrected_band)
+                avg_reflectance.append(np.mean(self.glint_area[:,:,band_number]))
+                avg_reflectance_corrected.append(np.mean(corrected_band[y1:y2,x1:x2]))
+                axes[band_number,0].imshow(self.im_aligned[:,:,band_number],vmin=0,vmax=1)
+            axes[band_number,1].imshow(corrected_band,vmin=0,vmax=1)
             axes[band_number,0].set_title(f'Band {self.wavelength_dict[band_number]} reflectance')
             axes[band_number,1].set_title(f'Band {self.wavelength_dict[band_number]} reflectance corrected')
 
@@ -219,11 +255,16 @@ class Hedley:
         rgb_bands = [2,1,0]
 
         fig, axes = plt.subplots(2,4,figsize=(14,10))
-        rgb_im = np.take(self.im_aligned,rgb_bands,axis=2)
-        rgb_im_corrected = np.stack([corrected_bands[i] for i in rgb_bands],axis=2)
-        avg_reflectance = [np.mean(self.glint_area[:,:,band_number]) for band_number in range(self.n_bands)]
+        if self.smoothing is True:
+            rgb_im = np.take(self.im_aligned_smoothed,rgb_bands,axis=2)
+            avg_reflectance = [np.mean(self.glint_area_smoothed[:,:,band_number]) for band_number in range(self.n_bands)]
+        else:
+            rgb_im = np.take(self.im_aligned,rgb_bands,axis=2)
+            avg_reflectance = [np.mean(self.glint_area[:,:,band_number]) for band_number in range(self.n_bands)]
+        
         avg_reflectance_corrected = [np.mean(corrected_bands[band_number][y1:y2,x1:x2]) for band_number in range(self.n_bands)]
-
+        rgb_im_corrected = np.stack([corrected_bands[i] for i in rgb_bands],axis=2)
+        
         axes[0,0].imshow(rgb_im)
         axes[0,0].set_title('Original RGB')
         coord, w, h = mutils.bboxes_to_patches(self.bbox)
