@@ -27,15 +27,17 @@ from sklearn.metrics import r2_score
 from scipy.stats.stats import pearsonr
 from scipy.stats import gaussian_kde
 from scipy.ndimage import gaussian_filter,laplace
+from scipy.optimize import minimize_scalar
 
 class HedleyMulti:
-    def __init__(self, im_aligned,bbox,mode="regression",sigma=2,smoothing=True):
+    def __init__(self, im_aligned,bbox,mode="regression",sigma=2,smoothing=True,gaussian_smoothing=True):
         """
         :param im_aligned (np.ndarray): band aligned and calibrated & corrected reflectance image
         :param bbox (tuple): bbox of a glint area e.g. water_glint
         :param mode (str): modes for estimating the slopes for Hedley correction (e.g. regression, least_sq, covariance,pearson)
         :param sigma (float): smoothing sigma for images
         :param smoothing (bool): whether to smooth images or not, due to the spatial offset in glint across diff bands
+        :param gaussian_smoothing (bool): whether to perform gaussian smoothing on glint mask
         """
         self.im_aligned = im_aligned
         if mode not in ['regression, least_sq, covariance,pearson']:
@@ -44,13 +46,19 @@ class HedleyMulti:
             self.mode = mode
         self.smoothing = smoothing
         self.bbox = bbox
-        self.bbox = self.sort_bbox()
-        ((x1,y1),(x2,y2)) = self.bbox
-        self.glint_area = self.im_aligned[y1:y2,x1:x2,:]
+        self.sigma = sigma
+        
+        if self.bbox is not None:
+            self.bbox = self.sort_bbox()
+            ((x1,y1),(x2,y2)) = self.bbox
+            self.glint_area = self.im_aligned[y1:y2,x1:x2,:]
+            self.glint_area_smoothed = gaussian_filter(self.glint_area, sigma=self.sigma)
+        
         if self.smoothing is True:
             self.im_aligned_smoothed = gaussian_filter(self.im_aligned, sigma=sigma)
-        self.sigma = sigma
-        self.glint_area_smoothed = gaussian_filter(self.glint_area, sigma=self.sigma)
+        
+        
+        self.gaussian_smoothing = gaussian_smoothing
         # initialise categories
         self.button_names = ['turbid_glint','water_glint','turbid','water','shore']
         # intialise colours
@@ -173,7 +181,7 @@ class HedleyMulti:
         else:
             plt.close()
 
-        return #regression_slopes
+        return regression_slopes
     
     def correction_bands(self):
         """ 
@@ -204,8 +212,52 @@ class HedleyMulti:
 
         return b_list
     
+    def otsu_thresholding(self,im,plot=True):
+        """
+        otsu thresholding with Brent's minimisation of a univariate function
+        """
+        count,bin,_ = plt.hist(im.flatten(),bins='auto')
+        plt.close()
+        
+        hist_norm = count/count.sum() #normalised histogram
+        Q = hist_norm.cumsum() # CDF function ranges from 0 to 1
+        N = count.shape[0]
+        bins = np.arange(N)
+        
+        def otsu_thresh(x):
+            x = int(x)
+            p1,p2 = np.hsplit(hist_norm,[x]) # probabilities
+            q1,q2 = Q[x],Q[N-1]-Q[x] # cum sum of classes
+            b1,b2 = np.hsplit(bins,[x]) # weights
+            # finding means and variances
+            m1,m2 = np.sum(p1*b1)/q1, np.sum(p2*b2)/q2
+            v1,v2 = np.sum(((b1-m1)**2)*p1)/q1,np.sum(((b2-m2)**2)*p2)/q2
+            # calculates the minimization function
+            fn = v1*q1 + v2*q2
+            return fn
+        
+        # brent method is used to minimise an univariate function
+        # bounded minimisation
+        res = minimize_scalar(otsu_thresh, bounds=(1, N), method='bounded')
+        thresh = bin[int(res.x)]
+
+        fig, axes = plt.subplots(1,2)
+        axes[0].imshow(im)
+        thresholded_im = np.where(im>thresh,1,0)
+        axes[1].imshow(thresholded_im)
+        axes[1].set_title(f'Thresh: {thresh:.3f}')
+        
+        if plot is True:
+            plt.show()
+            for ax in axes.flatten():
+                ax.axis('off')
+        else:
+            plt.close()
+        return thresh
+
     def get_glint_mask(self, plot = True):
         """
+        
         get glint mask using laplacian of image. 
         We assume that water constituents and features follow a smooth continuum, 
         but glint pixels vary a lot spatially and in intensities
@@ -214,25 +266,35 @@ class HedleyMulti:
         """
         ((x1,y1),(x2,y2)) = self.bbox
         fig, axes = plt.subplots(10,2,figsize=(8,20))
-        glint_mask = []
+        glint_mask_list = []
+        glint_threshold = []
         for i in range(self.im_aligned.shape[-1]):
             im_copy = self.im_aligned[:,:,i].copy()
             # find the laplacian first then apply gaussian smoothing (actually the order doesnt really matter)
             # take the absolute value of laplacian because the sign doesnt really matter, we want all edges
             im_laplacian = np.abs(laplace(im_copy))
-            im_smooth = gaussian_filter(im_laplacian, sigma=1)
+            if self.gaussian_smoothing is True:
+                im_smooth = gaussian_filter(im_laplacian, sigma=1)
+            else:
+                im_smooth = im_laplacian
             # normalise so values lie between 0 and 1. this sort of represents the confidence the pixel is a glint pixel, rather than a binary definition. 
             # note this doesnt represent the glint magnitude
             im_smooth = im_smooth/np.max(im_smooth)
-            glint_mask.append(im_smooth)
+            
             im = axes[i,0].imshow(im_copy)
             divider = make_axes_locatable(axes[i,0])
             cax = divider.append_axes('right', size='5%', pad=0.05)
             fig.colorbar(im,cax=cax,orientation='vertical')
 
-            im = axes[i,1].imshow(im_smooth)
-            avg_G = np.mean(im_smooth[y1:y2,x1:x2])
-            axes[i,1].set_title(f'mean G {avg_G:.3f} (Band {self.wavelength_dict[i]} nm)')
+            #threshold mask
+            thresh = self.otsu_thresholding(im_smooth,plot=plot)
+            glint_threshold.append(thresh)
+            glint_mask = np.where(im_smooth>thresh,1,0)
+            glint_mask_list.append(glint_mask)
+
+            im = axes[i,1].imshow(glint_mask)
+            avg_G = np.mean(glint_mask[y1:y2,x1:x2])
+            axes[i,1].set_title(f'mean G {avg_G:.3f}, thresh: {thresh:.3f}\n(Band {self.wavelength_dict[i]} nm)')
             divider = make_axes_locatable(axes[i,1])
             cax = divider.append_axes('right', size='5%', pad=0.05)
             fig.colorbar(im,cax=cax,orientation='vertical')
@@ -247,10 +309,13 @@ class HedleyMulti:
         else:
             plt.close()
 
-        return glint_mask
+        return glint_mask_list
 
 
-    def get_corrected_bands(self, plot = True,g_multiplier = 4):
+    def get_corrected_bands(self, plot = True):
+        """
+        
+        """
 
         ((x1,y1),(x2,y2)) = self.bbox
         # get regression relationship
@@ -261,11 +326,11 @@ class HedleyMulti:
         # g= glint mask at pixel_i
         # b = regression slope
         # R_min = 5th percentile of Rmin(NIR)
-        hedley_c = lambda r,g,b,R_min: r - g*g_multiplier*(r/b-R_min)
+        hedley_c = lambda r,g,b,R_min: r - g*(r/b-R_min)
 
         corrected_bands = []
-        avg_reflectance = []
-        avg_reflectance_corrected = []
+        # avg_reflectance = []
+        # avg_reflectance_corrected = []
 
         fig, axes = plt.subplots(self.n_bands,2,figsize=(10,20))
         for band_number in range(self.n_bands):
