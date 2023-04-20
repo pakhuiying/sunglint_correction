@@ -210,6 +210,7 @@ class Hedley:
         b_list = self.correction_bands()
 
         hedley_c = lambda x,RT_NIR,b,R_min: x - b*(RT_NIR - R_min)
+        # hedley_c = lambda x,RT_NIR,b,R_min: x - b*(RT_NIR - R_min) if (RT_NIR*b > x) else x
 
         corrected_bands = []
         avg_reflectance = []
@@ -219,16 +220,18 @@ class Hedley:
         for band_number in range(self.n_bands):
             b = b_list[band_number]
             if self.smoothing is True:
-                corrected_band = hedley_c(self.im_aligned_smoothed[:,:,band_number],self.im_aligned_smoothed[:,:,self.NIR_band],b,self.R_min)
+                # apply only the blured NIR band only to correct the glint extent for all bands (since here is a spatial discrepancy in glint distribution)
+                # but we use the original glint extent for all the bands
+                corrected_band = hedley_c(self.im_aligned[:,:,band_number],self.im_aligned_smoothed[:,:,self.NIR_band],b,self.R_min)
                 corrected_bands.append(corrected_band)
-                avg_reflectance.append(np.mean(self.glint_area_smoothed[:,:,band_number]))
-                avg_reflectance_corrected.append(np.mean(corrected_band[y1:y2,x1:x2]))
-                axes[band_number,0].imshow(self.im_aligned_smoothed[:,:,band_number],vmin=0,vmax=1)
+                # avg_reflectance.append(np.mean(self.glint_area[:,:,band_number]))
+                # avg_reflectance_corrected.append(np.mean(corrected_band[y1:y2,x1:x2]))
+                axes[band_number,0].imshow(self.im_aligned[:,:,band_number],vmin=0,vmax=1)
             else:
                 corrected_band = hedley_c(self.im_aligned[:,:,band_number],self.im_aligned[:,:,self.NIR_band],b,self.R_min)
                 corrected_bands.append(corrected_band)
-                avg_reflectance.append(np.mean(self.glint_area[:,:,band_number]))
-                avg_reflectance_corrected.append(np.mean(corrected_band[y1:y2,x1:x2]))
+                # avg_reflectance.append(np.mean(self.glint_area[:,:,band_number]))
+                # avg_reflectance_corrected.append(np.mean(corrected_band[y1:y2,x1:x2]))
                 axes[band_number,0].imshow(self.im_aligned[:,:,band_number],vmin=0,vmax=1)
             axes[band_number,1].imshow(corrected_band,vmin=0,vmax=1)
             axes[band_number,0].set_title(f'Band {self.wavelength_dict[band_number]} reflectance')
@@ -245,35 +248,36 @@ class Hedley:
 
         return corrected_bands
     
-    def correction_stats(self,corrected_bands):
+    def correction_stats(self):
         """
         :param corrected_bands (list of np.ndarrays): images corrected for sunglint
         Show corrected and original rgb image, mean reflectance
         """
         ((x1,y1),(x2,y2)) = self.bbox
-
+        corrected_bands = self.get_corrected_bands(plot=False)
         rgb_bands = [2,1,0]
 
         fig, axes = plt.subplots(2,4,figsize=(14,10))
-        if self.smoothing is True:
-            rgb_im = np.take(self.im_aligned_smoothed,rgb_bands,axis=2)
-            avg_reflectance = [np.mean(self.glint_area_smoothed[:,:,band_number]) for band_number in range(self.n_bands)]
-        else:
-            rgb_im = np.take(self.im_aligned,rgb_bands,axis=2)
-            avg_reflectance = [np.mean(self.glint_area[:,:,band_number]) for band_number in range(self.n_bands)]
+        #non-corrected images and reflectance for bbox
+        rgb_im = np.take(self.im_aligned,rgb_bands,axis=2)
+        avg_reflectance = [np.mean(self.glint_area[:,:,band_number]) for band_number in range(self.n_bands)]
         
-        avg_reflectance_corrected = [np.mean(corrected_bands[band_number][y1:y2,x1:x2]) for band_number in range(self.n_bands)]
+        #corrected images and reflectance for bbox
         rgb_im_corrected = np.stack([corrected_bands[i] for i in rgb_bands],axis=2)
+        avg_reflectance_corrected = [np.mean(corrected_bands[band_number][y1:y2,x1:x2]) for band_number in range(self.n_bands)]
         
+        # plot original rgb
         axes[0,0].imshow(rgb_im)
         axes[0,0].set_title('Original RGB')
         coord, w, h = mutils.bboxes_to_patches(self.bbox)
         rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
         axes[0,0].add_patch(rect)
-        # axes[0,1].add_patch(rect)
+        # plot corrected rgb
         axes[0,1].imshow(rgb_im_corrected)
         axes[0,1].set_title('Corrected RGB')
-
+        rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
+        axes[0,1].add_patch(rect)
+        # reflectance
         axes[0,2].plot(list(self.wavelength_dict.values()),[avg_reflectance[i] for i in list(self.wavelength_dict)], label='Original')
         axes[0,2].plot(list(self.wavelength_dict.values()),[avg_reflectance_corrected[i] for i in list(self.wavelength_dict)], label='Corrected')
         axes[0,2].set_xlabel('Wavelengths (nm)')
