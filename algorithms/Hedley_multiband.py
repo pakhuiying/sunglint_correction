@@ -464,7 +464,7 @@ class HedleyMulti:
         """
         :param im (np.ndarray): image of a band
         :param glint_mask (np.ndarray): glint mask, where glint area is 1 and non-glint area is 0
-        use brent method to get the optimimum b which minimises the variation (i.e. variance)
+        use brent method to get the optimimum b which minimises the variation (i.e. variance) in the entire image
         returns regression slope b
         """
         hedley_c = lambda r,g,b,R_min: r - g*(r/b-R_min)
@@ -489,12 +489,17 @@ class HedleyMulti:
             b_list.append(b)
         
         return b_list
-    def get_corrected_bands(self, plot = True,glint_normalisation=True):
+    
+    def get_corrected_bands(self, plot = True,glint_normalisation=True,optimise_b=True):
         """
         use regression slopes to correct each bands
         """
         # get regression relationship
-        b_list = self.correction_bands(glint_normalisation=glint_normalisation)
+        if optimise_b is False:
+            b_list = self.correction_bands(glint_normalisation=glint_normalisation)
+        else:
+            b_list = self.optimise_correction()
+
         glint_mask = self.get_glint_mask(plot=False)
         
         # where r=reflectance at pixel_i,
