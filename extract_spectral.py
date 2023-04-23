@@ -1,12 +1,12 @@
-import micasense.imageset as imageset
+# import micasense.imageset as imageset
 import micasense.capture as capture
 import cv2
 import micasense.imageutils as imageutils
-import micasense.plotutils as plotutils
+# import micasense.plotutils as plotutils
 import os, glob
 import json
 from tqdm import tqdm
-import pickle #This library will maintain the format as well
+# import pickle #This library will maintain the format as well
 import importlib
 import radiometric_calib_utils
 import mutils
@@ -22,6 +22,17 @@ from matplotlib.gridspec import GridSpec
 import numpy as np
 from math import ceil
 
+def sort_bbox(bbox):
+    """
+    :param (tuple): 4 coordinates describing opposite corners of the bbox coordinates
+    """
+    ((x1,y1),(x2,y2)) = bbox
+    if x1 > x2:
+        x1, x2 = x2, x1
+    if y1 > y2:
+        y1,y2 = y2, y1
+
+    return ((x1,y1),(x2,y2))
 
 def get_warp_matrices(current_fp):
     """ 
@@ -32,6 +43,38 @@ def get_warp_matrices(current_fp):
     warp_matrices = cap.get_warp_matrices()
     cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
     return warp_matrices, cropped_dimensions
+
+def query_bboxes(dir,categories=None, condition= "or"):
+    """
+    :param dir (str): directory of where all the bboxes (.txt) are stored i.e. saved_bboxes/
+    :param categories (list of str): where each str is a category in 'turbid_glint','water_glint','turbid','water','shore'
+    :param condition (str): either "and" or "or", which are operators connecting all the categories listed in categories
+    returns a list of dict which fulfills categories queried and condition stipulated
+    """
+    fp_list = [os.path.join(dir,fp) for fp in os.listdir(dir) if (fp.endswith(".txt")) and ("last_image" not in fp)]
+    queried_fp = []
+    for f in fp_list:
+        with open(f,"r") as fp:
+            # print(fp)
+            data = json.load(fp)
+        category_dict = data[list(data)[0]]
+        bboxes = []
+        for cat in categories:
+            bbox = category_dict[cat]
+            bbox_exists = bbox is not None
+            # save as tuple (value of bbox, and whether bbox_exists)
+            bboxes.append((cat,bbox,bbox_exists))
+        if condition == "or":
+            if any([bb[-1] for bb in bboxes]) is True:
+                queried_dict = {f:{bb[0]:bb[1] for bb in bboxes}} #where key is filepath, and sub-keys are categories, and values are bboxes
+                queried_fp.append(queried_dict)
+        else:
+            if all([bb[-1] for bb in bboxes]) is True:
+                queried_dict = {f:{bb[0]:bb[1] for bb in bboxes}} #where key is filepath, and sub-keys are categories, and values are bboxes
+                queried_fp.append(queried_dict)
+    
+    return queried_fp
+
 
 class VerifyBboxes:
     def __init__(self,dir, assign_new_dir = None, split_iter=3):
@@ -87,7 +130,7 @@ class VerifyBboxes:
         parent_directory (e.g. 'F:/surveys_10band/10thSur24Aug/F1/RawImg')
             img_names (e.g. 'IMG_0004_1.tif')
         """
-        fp_list = [os.path.join(self.dir,fp) for fp in os.listdir(self.dir)]
+        fp_list = [os.path.join(self.dir,fp) for fp in os.listdir(self.dir) if (fp.endswith(".txt")) and ("last_image" not in fp)]
         store_dict = dict()
         for fp in fp_list:
             with open(fp, 'r') as fp:
@@ -419,6 +462,10 @@ class ReflectanceImage:
 
 class ThresholdGlint:
     def __init__(self, im_aligned,bbox):
+        """
+        :param im_aligned (np.ndarray): band aligned and calibrated & corrected reflectance image
+        :param bbox (tuple): bbox of an area e.g. water_glint
+        """
         self.im_aligned = im_aligned
         self.bbox = bbox
         # initialise categories
