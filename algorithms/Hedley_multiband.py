@@ -38,6 +38,7 @@ class HedleyMulti:
         :param sigma (float): smoothing sigma for images
         :param smoothing (bool): whether to smooth images or not, due to the spatial offset in glint across diff bands
         :param gaussian_smoothing (bool): whether to perform gaussian smoothing on glint mask
+        :param histogram_normalisation (bool): whether to normalise the histogram such that area underneath histogram is 1 i.e. hist/hist.sum()
         """
         self.im_aligned = im_aligned
         if mode not in ['regression, least_sq, covariance,pearson']:
@@ -428,14 +429,14 @@ class HedleyMulti:
         """ 
         returns a list of slope in band order i.e. 0,1,2,3,4,5,6,7,8,9
         """
-        if self.bbox is None:
+        if self.bbox is None: #if bbox is not supplied, use histogram histogram regression
             histogram_regression = self.plot_histogram_regression(plot=False)
             if glint_normalisation is True:
                 b_list = histogram_regression['histogram_normalised']
             else:
                 b_list = histogram_regression['histogram']
 
-        else:
+        else: # if bbox is supplied
             if self.smoothing is True:
                 NIR_pixels = self.glint_area_smoothed[:,:,self.NIR_band].flatten().reshape(-1, 1)
             else:
@@ -492,12 +493,15 @@ class HedleyMulti:
     
     def get_corrected_bands(self, plot = True,glint_normalisation=True,optimise_b=True):
         """
+        :param glint_normalisation (bool): whether to normalise/contrast stretch extracted glint by using histogram normalisation
+        :param optimise_b (bool): whether to optimise b instead of calculating for b (default is True)
         use regression slopes to correct each bands
+        returns a list of corrected bands in band order i.e. 0,1,2,3,4,5,6,7,8,9
         """
         # get regression relationship
-        if optimise_b is False:
+        if optimise_b is False: # calculate b from histogram regression
             b_list = self.correction_bands(glint_normalisation=glint_normalisation)
-        else:
+        else: # optimise b
             b_list = self.optimise_correction()
 
         glint_mask = self.get_glint_mask(plot=False)
@@ -622,4 +626,45 @@ class HedleyMulti:
         plt.tight_layout()
         plt.show()
 
+        return
+    
+    def compare_image(self,save_dir=None, filename = None, plot = True):
+        """
+        :param save_dir (str): specify directory to store image in. If it is None, no image is saved
+        :param filename (str): filename of image u want to save e.g. 'D:\\EPMC_flight\\10thSur24Aug\\F2\\RawImg\\IMG_0192_1.tif'
+        returns a figure where left figure is original image, and right figure is corrected image
+        """
+        corrected_bands = self.get_corrected_bands(plot=False)
+        corrected_im = np.stack([corrected_bands[i] for i in [2,1,0]],axis=2)
+        original_im = np.take(self.im_aligned,[2,1,0],axis=2)
+        fig, axes = plt.subplots(1,2,figsize=(12,7))
+        axes[0].imshow(original_im)
+        axes[0].set_title('Original Image')
+        axes[1].imshow(corrected_im)
+        axes[1].set_title('Corrected Image')
+        for ax in axes:
+            ax.axis('off')
+        plt.tight_layout()
+
+        if save_dir is None:
+            #create a new dir to store plot images
+            save_dir = os.path.join(os.getcwd(),"corrected_images")
+            if not os.path.exists(save_dir):
+                os.mkdir(save_dir)
+        else:
+            save_dir = os.path.join(save_dir,"corrected_images")
+            if not os.path.exists(save_dir):
+                os.mkdir(save_dir)
+
+        filename = mutils.get_all_dir(filename,iter=4)
+        filename = os.path.splitext(filename)[0]
+        full_fn = os.path.join(save_dir,filename)
+
+        fig.suptitle(filename)
+        fig.savefig('{}.png'.format(full_fn))
+
+        if plot is True:
+            plt.show()
+        else:
+            plt.close()
         return
