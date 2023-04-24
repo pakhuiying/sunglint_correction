@@ -245,3 +245,14 @@ def assign_new_parent_dir(panel_fp,parent_dir, split_iter=3):
         panel_fp_dict[new_parent_dir] = capture_list
     
     return panel_fp_dict
+
+def filepath_from_filename(fn,dir=''):
+    """
+    :param fn (str): e.g. '13thSur22Sep_F1_RawImg_IMG_0085_1.png'
+    reconstruct filepath from filename, only needed for QAQC files
+    """
+    basename, ext = os.path.splitext(fn)
+    name_list = basename.split('_')
+    dir = os.path.join(dir,*name_list[:3]) # expand list as arguments
+    fn = '_'.join(name_list[3:])
+    return dir, fn

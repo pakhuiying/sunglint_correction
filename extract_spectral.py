@@ -44,36 +44,31 @@ def get_warp_matrices(current_fp):
     cropped_dimensions,_ = imageutils.find_crop_bounds(cap,warp_matrices)
     return warp_matrices, cropped_dimensions
 
-def query_bboxes(dir,categories=None, condition= "or"):
+def query_bboxes(img_bboxes, categories=None, condition= "or"):
     """
-    :param dir (str): directory of where all the bboxes (.txt) are stored i.e. saved_bboxes/
+    :param img_bboxes (dict): output from store_bboxes
     :param categories (list of str): where each str is a category in 'turbid_glint','water_glint','turbid','water','shore'
     :param condition (str): either "and" or "or", which are operators connecting all the categories listed in categories
     returns a list of dict which fulfills categories queried and condition stipulated
     """
-    fp_list = [os.path.join(dir,fp) for fp in os.listdir(dir) if (fp.endswith(".txt")) and ("last_image" not in fp)]
-    queried_fp = []
-    for f in fp_list:
-        with open(f,"r") as fp:
-            # print(fp)
-            data = json.load(fp)
-        category_dict = data[list(data)[0]]
-        bboxes = []
-        for cat in categories:
-            bbox = category_dict[cat]
-            bbox_exists = bbox is not None
-            # save as tuple (value of bbox, and whether bbox_exists)
-            bboxes.append((cat,bbox,bbox_exists))
-        if condition == "or":
-            if any([bb[-1] for bb in bboxes]) is True:
-                queried_dict = {f:{bb[0]:bb[1] for bb in bboxes}} #where key is filepath, and sub-keys are categories, and values are bboxes
-                queried_fp.append(queried_dict)
-        else:
-            if all([bb[-1] for bb in bboxes]) is True:
-                queried_dict = {f:{bb[0]:bb[1] for bb in bboxes}} #where key is filepath, and sub-keys are categories, and values are bboxes
-                queried_fp.append(queried_dict)
+    queried_list = []#{fp: {img_name: dict() for img_name in img_dict.keys()} for fp,img_dict in img_bboxes.items()}
+    for fp,img_dict in img_bboxes.items():
+        for img_name, category_dict in img_dict.items():
+            queried_data = [(cat,bbox,cat in categories) for cat, bbox in category_dict.items()]
+            if condition == "or":
+                if any([bb[-1] for bb in queried_data]):
+                    queried_list.append({fp: {img_name: {bb[0]:bb[1] for bb in queried_data if bb[-1] is True}}})      
+            elif condition == "and":
+                if all([bb[-1] for bb in queried_data]) is True and (len(queried_data) == len(categories)):
+                    queried_list.append({fp: {img_name: {bb[0]:bb[1] for bb in queried_data}}})
+
+    output_fp = {fp: dict() for d in queried_list for fp in d.keys()}
+    for d in queried_list:
+        for fp, img_dict in d.items():
+            for img_name, category_dict in img_dict.items():
+                output_fp[fp][img_name] = category_dict
     
-    return queried_fp
+    return output_fp
 
 
 class VerifyBboxes:
@@ -131,27 +126,29 @@ class VerifyBboxes:
             img_names (e.g. 'IMG_0004_1.tif')
         """
         fp_list = [os.path.join(self.dir,fp) for fp in os.listdir(self.dir) if (fp.endswith(".txt")) and ("last_image" not in fp)]
-        store_dict = dict()
-        for fp in fp_list:
-            with open(fp, 'r') as fp:
-                data = json.load(fp)
-            basename,file_name = os.path.split(list(data)[0])
-            if self.assign_new_dir is not None:
-                basename = self.assign_new_parent_dir(basename)
-            store_dict[basename] = dict()
         
+        store_list = []
         for fp in fp_list:
             with open(fp, 'r') as fp:
                 data = json.load(fp)
             basename,file_name = os.path.split(list(data)[0])
+            if len(file_name) > 14:
+                end_folder, file_name = mutils.filepath_from_filename(file_name,dir='')
+                basename = os.path.join(basename,end_folder)
+                file_name = file_name + '.tif'
+            
             if self.assign_new_dir is not None:
                 basename = self.assign_new_parent_dir(basename)
-            bboxes = {k: v for d in data.values() for k,v in d.items() if v is not None}
-            if bool(bboxes) is True:
-                store_dict[basename][file_name] = bboxes
-                # store_dict[basename] = {file_name: bboxes}
-            
-        return store_dict
+
+            store_list.append({basename: {file_name: data[list(data)[0]]}})
+
+        output_fp = {fp: dict() for d in store_list for fp in d.keys()}
+        for d in store_list:
+            for fp, img_dict in d.items():
+                for img_name, category_dict in img_dict.items():
+                    output_fp[fp][img_name] = {cat:bbox for cat,bbox in category_dict.items() if bbox is not None}
+                    
+        return output_fp
 
     
     def plot_bboxes(self,show_n = 6,figsize=(8,20),save = False,dpi=200, plot_dir = None):
