@@ -26,7 +26,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 from scipy.stats.stats import pearsonr
 from scipy.stats import gaussian_kde
-from scipy.ndimage import gaussian_filter,laplace
+from scipy.ndimage import gaussian_filter,laplace, gaussian_laplace
 from scipy.optimize import minimize_scalar
 
 class HedleyMulti:
@@ -134,6 +134,7 @@ class HedleyMulti:
     def otsu_thresholding(self,im,plot=True):
         """
         otsu thresholding with Brent's minimisation of a univariate function
+        returns the value of the threshold for input
         """
         count,bin,_ = plt.hist(im.flatten(),bins='auto')
         plt.close()
@@ -175,6 +176,9 @@ class HedleyMulti:
         return thresh
 
     def get_glint(self, plot = True):
+        """
+        returns extracted glint based on get_glint_mask
+        """
         glint_mask = self.get_glint_mask(plot=False)
         extracted_glint_list = []
         fig, axes = plt.subplots(10,2,figsize=(8,20))
@@ -183,9 +187,9 @@ class HedleyMulti:
             extracted_glint = gm*self.im_aligned[:,:,i]
             extracted_glint_list.append(extracted_glint)
             axes[i,0].imshow(gm)
-            axes[i,0].set_title('Glint mask')
+            axes[i,0].set_title(f'Glint mask (Band {self.wavelength_dict[i]} nm)')
             axes[i,1].imshow(extracted_glint)
-            axes[i,1].set_title('Extracted glint')
+            axes[i,1].set_title(f'Extracted glint (Band {self.wavelength_dict[i]} nm)')
 
         if plot is True:
             for ax in axes.flatten():
@@ -211,13 +215,16 @@ class HedleyMulti:
         glint_threshold = []
         for i in range(self.im_aligned.shape[-1]):
             im_copy = self.im_aligned[:,:,i].copy()
-            # find the laplacian first then apply gaussian smoothing (actually the order doesnt really matter)
+            # find the laplacian of gaussian first
             # take the absolute value of laplacian because the sign doesnt really matter, we want all edges
-            im_laplacian = np.abs(laplace(im_copy))
-            if self.gaussian_smoothing is True:
-                im_smooth = gaussian_filter(im_laplacian, sigma=1)
-            else:
-                im_smooth = im_laplacian
+            im_smooth = np.abs(gaussian_laplace(im_copy,sigma=1))
+            # # find the laplacian first then apply gaussian smoothing (actually the order doesnt really matter)
+            # # take the absolute value of laplacian because the sign doesnt really matter, we want all edges
+            # im_laplacian = np.abs(laplace(im_copy))
+            # if self.gaussian_smoothing is True:
+            #     im_smooth = gaussian_filter(im_laplacian, sigma=1)
+            # else:
+            #     im_smooth = im_laplacian
             # normalise so values lie between 0 and 1. this sort of represents the confidence the pixel is a glint pixel, rather than a binary definition. 
             # note this doesnt represent the glint magnitude
             im_smooth = im_smooth/np.max(im_smooth)
@@ -668,3 +675,52 @@ class HedleyMulti:
         else:
             plt.close()
         return
+    
+    def simulate_glint(self, background_spectral=None,plot=True):
+        """
+        simulate glint on a known background reference
+        """
+        if background_spectral is None:
+            background_spectral = [0.19503655,
+                                    0.24067494,
+                                    0.17612752,
+                                    0.119807795,
+                                    0.15413295,
+                                    0.15250316,
+                                    0.1955206,
+                                    0.1881334,
+                                    0.16076161,
+                                    0.10805529]
+        else:
+            assert background_spectral.shape == (1,1,10)
+        
+        glint_mask = self.get_glint_mask(plot=False)
+        rgb_bands = [2,1,0]
+        nrow, ncol, n_bands = self.im_aligned.shape
+
+        # simulate back ground shape with known spectral curves
+        background_im = np.tile(background_spectral,(nrow,ncol,1))
+        background_rgb = np.take(background_im,rgb_bands,axis=2)
+
+        im_aligned = self.im_aligned.copy()
+        for i in range(n_bands):
+            background_im[:,:,i][glint_mask[i]==1] = im_aligned[:,:,i][glint_mask[i]==1]
+
+        
+        plt.figure()
+        plt.imshow(np.take(background_im,rgb_bands,axis=2))
+        plt.title('Simulated Glint RGB image')
+
+        fig, axes = plt.subplots(1,3,figsize=(10,5))
+
+        for i,b in enumerate(rgb_bands):
+            background_unmix = background_rgb.copy()
+            background_unmix[:,:,i][glint_mask[b]==1] = im_aligned[:,:,b][glint_mask[b]==1]
+            axes[i].imshow(background_unmix)
+            axes[i].axis('off')
+
+        if plot is True:
+            plt.show()
+        else:
+            plt.close()
+        return background_im
