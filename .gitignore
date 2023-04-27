@@ -3,7 +3,13 @@ rawimages/
 QAQC_plots/
 QAQC_relabel/
 saved_bboxes/
+saved_bboxes_1/
+saved_bboxes_1_continue/
 saved_data1/
 saved_bboxes_complement/
 saved_plots/
 problems.ipynb
+corrected_images/
+example_images/
+validate_corrected_images/
+turbidity_database/
