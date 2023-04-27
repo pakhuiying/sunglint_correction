@@ -22,18 +22,6 @@ from matplotlib.gridspec import GridSpec
 import numpy as np
 from math import ceil
 
-def sort_bbox(bbox):
-    """
-    :param (tuple): 4 coordinates describing opposite corners of the bbox coordinates
-    """
-    ((x1,y1),(x2,y2)) = bbox
-    if x1 > x2:
-        x1, x2 = x2, x1
-    if y1 > y2:
-        y1,y2 = y2, y1
-
-    return ((x1,y1),(x2,y2))
-
 def get_warp_matrices(current_fp):
     """ 
     helper function to get wrap_matrices from an image filename e.g. .../IMG_0041_1..tif
@@ -347,11 +335,8 @@ class ReflectanceImage:
             ax.axis('off')
 
         for i, (category,bbox) in enumerate(bboxes.items()):
+            bbox = mutils.sort_bbox(bbox)
             ((x1,y1),(x2,y2)) = bbox
-            if x1 > x2:
-                x1, x2 = x2, x1
-            if y1 > y2:
-                y1,y2 = y2, y1
             ax_idx = i+1 #axis index
             # crop rgb image based on bboxes drawn
             im_cropped = rgb_image[y1:y2,x1:x2,:]
@@ -388,12 +373,7 @@ class ReflectanceImage:
         plot multispectral reflectance of the image cropped by bbox
         """
         im_aligned = self.get_aligned_reflectance()
-
-        ((x1,y1),(x2,y2)) = bbox
-        if x1 > x2:
-            x1, x2 = x2, x1
-        if y1 > y2:
-            y1,y2 = y2, y1
+        ((x1,y1),(x2,y2)) = mutils.sort_bbox(bbox)
 
         def multiline(xs, ys, c, ax=None, **kwargs):
             """Plot lines with different colorings
@@ -476,13 +456,10 @@ class ThresholdGlint:
         self.n_bands = im_aligned.shape[-1]
 
     def sort_bbox(self):
-        ((x1,y1),(x2,y2)) = self.bbox
-        if x1 > x2:
-            x1, x2 = x2, x1
-        if y1 > y2:
-            y1,y2 = y2, y1
+        ((x1,y1),(x2,y2)) = mutils.sort_bbox(self.bbox)
         
         return ((x1,y1),(x2,y2))
+    
     def histogram_threshold(self, n_bins=200,plot=True,**kwargs):
         """
         :param n_bins (int): basically determines how sensitive we want the threshold to be. The larger the n_bins (the more sensitive the threshold for glint cut off)

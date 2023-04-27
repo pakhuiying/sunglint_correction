@@ -26,6 +26,9 @@ def order_bands_from_filenames(imageNames):
     return list(imageNames_ordered.values())
 
 def load_pickle(fp):
+    """
+    :param fp (str): absolute filepath of the pickle file
+    """
     if fp.endswith('ob'):
         with open(fp, 'rb') as fp:
             data = pickle.load(fp)
@@ -152,6 +155,18 @@ def bboxes_to_patches(bboxes):
     else:
         return None
 
+def sort_bbox(bbox):
+    """
+    :param (tuple): 4 coordinates describing opposite corners of the bbox coordinates
+    """
+    ((x1,y1),(x2,y2)) = bbox
+    if x1 > x2:
+        x1, x2 = x2, x1
+    if y1 > y2:
+        y1,y2 = y2, y1
+
+    return ((x1,y1),(x2,y2))
+
 def plot_bboxes(fp):
     """ 
     :param fp (str): filepath of txt file which contains the bboxes of turbid, water, turbid_glint, water_glint, shore
@@ -256,3 +271,13 @@ def filepath_from_filename(fn,dir=''):
     dir = os.path.join(dir,*name_list[:3]) # expand list as arguments
     fn = '_'.join(name_list[3:])
     return dir, fn
+
+def get_all_dir(fp,iter=3):
+    """ get all parent sub directories up to 3 levels"""
+    fp_temp = fp
+    sub_dir_list = []
+    for i in range(iter):
+        base_fn, fn = os.path.split(fp_temp)
+        sub_dir_list.append(fn)
+        fp_temp = base_fn
+    return '_'.join(reversed(sub_dir_list))

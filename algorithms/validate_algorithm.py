@@ -5,8 +5,9 @@ import micasense.imageutils as imageutils
 import micasense.capture as capture
 import cv2
 import matplotlib.pyplot as plt
-import PIL.Image as Image
 import matplotlib.patches as patches
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import PIL.Image as Image
 import json
 import glob
 import shutil
@@ -17,11 +18,21 @@ import algorithms.Hedley_multiband as HedleyMulti
 from scipy.ndimage import gaussian_filter,laplace, gaussian_laplace
 from scipy.optimize import minimize_scalar
 
-class ValidateCorrection:
-    def __init__(self,im_aligned, background_spectral=None):
+class SimulateGlint:
+    def __init__(self,im_aligned, bbox=None, background_spectral=None):
+        """
+        :param im_aligned (np.ndarray) band-aligned image from:
+            RI = espect.ReflectanceImage(cap)
+            im_aligned = RI.get_aligned_reflectance()
+        :param bbox (tuple) bounding boxes ((x1,y1),(x2,y2))
+        :param background_spectral (np.ndarray): spectra that determines the ocean colour for the simulated background
+        """
         self.im_aligned = im_aligned
         self.background_spectral = background_spectral
         self.n_bands = im_aligned.shape[-1]
+        self.bbox = bbox
+        if bbox is not None:
+            self.bbox = mutils.sort_bbox(bbox)
         if self.background_spectral is not None:
              assert background_spectral.shape == (1,1,self.n_bands)
         wavelengths = mutils.sort_bands_by_wavelength()
@@ -59,7 +70,7 @@ class ValidateCorrection:
         
         return thresh
     
-    def get_glint_mask(self, plot = True):
+    def get_glint_mask(self):
         """
         get glint mask using laplacian of image. 
         We assume that water constituents and features follow a smooth continuum, 
@@ -67,9 +78,15 @@ class ValidateCorrection:
         Note that for very extensive glint, this method may not work as well <--:TODO use U-net to identify glint mask
         returns a list of np.ndarray
         """
+        if self.bbox is not None:
+            ((x1,y1),(x2,y2)) = self.bbox
+
         glint_mask_list = []
         for i in range(self.im_aligned.shape[-1]):
-            im_copy = self.im_aligned[:,:,i].copy()
+            if self.bbox is not None:
+                im_copy = self.im_aligned[y1:y2,x1:x2,i].copy()
+            else:
+                im_copy = self.im_aligned[:,:,i].copy()
             # find the laplacian of gaussian first
             # take the absolute value of laplacian because the sign doesnt really matter, we want all edges
             im_smooth = np.abs(gaussian_laplace(im_copy,sigma=1))
@@ -86,10 +103,17 @@ class ValidateCorrection:
         """
         get the average reflectance across the whole image from non-glint regions
         """
+        if self.bbox is not None:
+            ((x1,y1),(x2,y2)) = self.bbox
+
         glint_mask = self.get_glint_mask()
+        
         background_spectral = []
         for i in range(self.n_bands):
-            im_copy = self.im_aligned[:,:,i].copy()
+            if self.bbox is not None:
+                im_copy = self.im_aligned[y1:y2,x1:x2,i].copy()
+            else:
+                im_copy = self.im_aligned[:,:,i].copy()
             gm = glint_mask[i]
             background_spectral.append(np.mean(im_copy[gm == 0]))
         
@@ -104,7 +128,7 @@ class ValidateCorrection:
             assert self.background_spectral.shape == (1,1,10)
             background_spectral = self.background_spectral
 
-        glint_mask = self.get_glint_mask(plot=False)
+        glint_mask = self.get_glint_mask()
         nrow, ncol, n_bands = self.im_aligned.shape
 
         # simulate back ground shape with known spectral curves
@@ -123,7 +147,7 @@ class ValidateCorrection:
 
         return background_im
     
-    def validate_correction(self, save_dir=None, filename = None, plot = True):
+    def validate_correction(self, sigma=1, save_dir=None, filename = None, plot = True):
         """
         validate sun glint correction algorithm with simulated image
         """
@@ -137,27 +161,43 @@ class ValidateCorrection:
         background_spectral = np.tile(background_spectral,(simulated_glint.shape[0],simulated_glint.shape[1],1))
         
         # get corrected_bands
-        HM = HedleyMulti.HedleyMulti(simulated_glint,None)
+        HM = HedleyMulti.HedleyMulti(simulated_glint,None, sigma=sigma)
         corrected_bands = HM.get_corrected_bands(plot=False)
         corrected_bands = np.stack(corrected_bands,axis=2)
 
         rgb_bands = [2,1,0]
-        fig = plt.figure(figsize=(10, 8), layout="constrained")
+        fig = plt.figure(figsize=(12, 9), layout="constrained")
         spec = fig.add_gridspec(3, 3)
 
         plot_dict = {"Simulated background":background_spectral,"Simulated glint":simulated_glint,"Corrected Image":corrected_bands}
 
-        ax0 = fig.add_subplot(spec[:, 1:])
+        # calculate differences spatially between original and corrected image
+        residual_im = corrected_bands - background_spectral
+        ax0 = fig.add_subplot(spec[0,1])
+        im0 = ax0.imshow(np.take(residual_im,rgb_bands,axis=2))
+        ax0.axis('off')
+        ax0.set_title(r"Corrected - original $\rho$")
+        # divider = make_axes_locatable(ax0)
+        # cax = divider.append_axes('right', size='5%', pad=0.05)
+        # fig.colorbar(im0,cax=cax,orientation='vertical')
+
+        # calculate differences in reflectance between original and corrected image
+        ax1 = fig.add_subplot(spec[0,2])
+        ax1.plot(list(self.wavelength_dict.values()),[residual_im[:,:,i].mean() for i in list(self.wavelength_dict)])
+        ax1.set_xlabel("Wavelength (nm)")
+        ax1.set_title(r"Corrected - original $\rho$")
+
+        ax2 = fig.add_subplot(spec[1:, 1:])
         ax_plots = [fig.add_subplot(spec[i,0]) for i in range(3)]
         for (title, im), ax in zip(plot_dict.items(),ax_plots):
-            ax0.plot(list(self.wavelength_dict.values()),[im[:,:,i].mean() for i in list(self.wavelength_dict)],label=title)
+            ax2.plot(list(self.wavelength_dict.values()),[im[:,:,i].mean() for i in list(self.wavelength_dict)],label=title)
             ax.imshow(np.take(im,rgb_bands,axis=2))
             ax.set_title(title)
             ax.axis('off')
         
-        ax0.set_xlabel("Wavelength (nm)")
-        ax0.set_ylabel("Reflectance")
-        ax0.legend(loc='upper right')
+        ax2.set_xlabel("Wavelength (nm)")
+        ax2.set_ylabel("Reflectance")
+        ax2.legend(loc='upper right')
 
         if save_dir is None:
             #create a new dir to store plot images
@@ -177,9 +217,8 @@ class ValidateCorrection:
         fig.savefig('{}.png'.format(full_fn))
 
         if plot is True:
+            plt.tight_layout()
             plt.show()
         else:
             plt.close()
-        return
-        
         return

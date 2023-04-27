@@ -379,7 +379,7 @@ class ImageCorrection:
             plt.title('Comparison of reflectances')
             plt.legend(loc='center left',bbox_to_anchor=(1.04, 0.5))
             plt.xlabel('Wavelength (nm)')
-            plt.ylabel('Reflectance (%)')
+            plt.ylabel('Reflectance')
             plt.show()
             return
 

@@ -35,6 +35,8 @@ class Hedley:
         :param mode (str): modes for estimating the slopes for Hedley correction (e.g. regression, least_sq, covariance,pearson)
         :param sigma (float): smoothing sigma for images
         :param smoothing (bool): whether to smooth images or not, due to the spatial offset in glint across diff bands
+            The smoothed NIR is used to calculate the regression with other bands, 
+            and the smoothed NIR is used to correct other bands
         """
         self.im_aligned = im_aligned
         if mode not in ['regression, least_sq, covariance,pearson']:
@@ -42,8 +44,7 @@ class Hedley:
         else:
             self.mode = mode
         self.smoothing = smoothing
-        self.bbox = bbox
-        self.bbox = self.sort_bbox()
+        self.bbox = mutils.sort_bbox(bbox)
         ((x1,y1),(x2,y2)) = self.bbox
         self.glint_area = self.im_aligned[y1:y2,x1:x2,:]
         if self.smoothing is True:
@@ -61,14 +62,14 @@ class Hedley:
         self.n_bands = im_aligned.shape[-1]
         self.NIR_band = list(self.wavelength_dict)[-1]
     
-    def sort_bbox(self):
-        ((x1,y1),(x2,y2)) = self.bbox
-        if x1 > x2:
-            x1, x2 = x2, x1
-        if y1 > y2:
-            y1,y2 = y2, y1
+    # def sort_bbox(self):
+    #     ((x1,y1),(x2,y2)) = self.bbox
+    #     if x1 > x2:
+    #         x1, x2 = x2, x1
+    #     if y1 > y2:
+    #         y1,y2 = y2, y1
 
-        return ((x1,y1),(x2,y2))
+    #     return ((x1,y1),(x2,y2))
 
     def regression_slope(self,NIR,band):
         """
@@ -213,8 +214,8 @@ class Hedley:
         # hedley_c = lambda x,RT_NIR,b,R_min: x - b*(RT_NIR - R_min) if (RT_NIR*b > x) else x
 
         corrected_bands = []
-        avg_reflectance = []
-        avg_reflectance_corrected = []
+        # avg_reflectance = []
+        # avg_reflectance_corrected = []
 
         fig, axes = plt.subplots(self.n_bands,2,figsize=(10,20))
         for band_number in range(self.n_bands):

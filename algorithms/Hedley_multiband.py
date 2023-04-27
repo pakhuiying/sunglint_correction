@@ -30,12 +30,12 @@ from scipy.ndimage import gaussian_filter,laplace, gaussian_laplace
 from scipy.optimize import minimize_scalar
 
 class HedleyMulti:
-    def __init__(self, im_aligned,bbox,mode="regression",sigma=2,smoothing=True,gaussian_smoothing=True,histogram_normalisation=True):
+    def __init__(self, im_aligned,bbox,mode="regression",sigma=1,smoothing=True,gaussian_smoothing=True,histogram_normalisation=True):
         """
         :param im_aligned (np.ndarray): band aligned and calibrated & corrected reflectance image
         :param bbox (tuple): bbox of a glint area e.g. water_glint
         :param mode (str): modes for estimating the slopes for Hedley correction (e.g. regression, least_sq, covariance,pearson)
-        :param sigma (float): smoothing sigma for images
+        :param sigma (float): smoothing sigma for LoG
         :param smoothing (bool): whether to smooth images or not, due to the spatial offset in glint across diff bands
         :param gaussian_smoothing (bool): whether to perform gaussian smoothing on glint mask
         :param histogram_normalisation (bool): whether to normalise the histogram such that area underneath histogram is 1 i.e. hist/hist.sum()
@@ -50,7 +50,7 @@ class HedleyMulti:
         self.sigma = sigma
         
         if self.bbox is not None:
-            self.bbox = self.sort_bbox()
+            self.bbox = mutils.sort_bbox(bbox)
             ((x1,y1),(x2,y2)) = self.bbox
             self.glint_area = self.im_aligned[y1:y2,x1:x2,:]
             self.glint_area_smoothed = gaussian_filter(self.glint_area, sigma=self.sigma)
@@ -73,14 +73,14 @@ class HedleyMulti:
         self.NIR_band = list(self.wavelength_dict)[-1]
         self.R_min = np.percentile(self.im_aligned[:,:,self.NIR_band].flatten(),5,interpolation='nearest')
 
-    def sort_bbox(self):
-        ((x1,y1),(x2,y2)) = self.bbox
-        if x1 > x2:
-            x1, x2 = x2, x1
-        if y1 > y2:
-            y1,y2 = y2, y1
+    # def sort_bbox(self):
+    #     ((x1,y1),(x2,y2)) = self.bbox
+    #     if x1 > x2:
+    #         x1, x2 = x2, x1
+    #     if y1 > y2:
+    #         y1,y2 = y2, y1
 
-        return ((x1,y1),(x2,y2))
+    #     return ((x1,y1),(x2,y2))
 
     def regression_slope(self,NIR,band):
         """
@@ -177,7 +177,7 @@ class HedleyMulti:
 
     def get_glint(self, plot = True):
         """
-        returns extracted glint based on get_glint_mask
+        returns a list of np.ndarray, where each item is an extracted glint for each band based on get_glint_mask
         """
         glint_mask = self.get_glint_mask(plot=False)
         extracted_glint_list = []
@@ -202,7 +202,7 @@ class HedleyMulti:
     
     def get_glint_mask(self, plot = True):
         """
-        get glint mask using laplacian of image. 
+        get glint mask using laplacian of gaussian image. 
         We assume that water constituents and features follow a smooth continuum, 
         but glint pixels vary a lot spatially and in intensities
         Note that for very extensive glint, this method may not work as well <--:TODO use U-net to identify glint mask
@@ -217,7 +217,7 @@ class HedleyMulti:
             im_copy = self.im_aligned[:,:,i].copy()
             # find the laplacian of gaussian first
             # take the absolute value of laplacian because the sign doesnt really matter, we want all edges
-            im_smooth = np.abs(gaussian_laplace(im_copy,sigma=1))
+            im_smooth = np.abs(gaussian_laplace(im_copy,sigma=self.sigma))
             # # find the laplacian first then apply gaussian smoothing (actually the order doesnt really matter)
             # # take the absolute value of laplacian because the sign doesnt really matter, we want all edges
             # im_laplacian = np.abs(laplace(im_copy))
@@ -518,6 +518,7 @@ class HedleyMulti:
         # b = regression slope
         # R_min = 5th percentile of Rmin(NIR)
         hedley_c = lambda r,g,b,R_min: r - g*(r/b-R_min)
+        # hedley_c = lambda r,g,b: r - g*(r/b)
 
         corrected_bands = []
         # avg_reflectance = []
@@ -529,6 +530,7 @@ class HedleyMulti:
             R = self.im_aligned[:,:,band_number]
             G = glint_mask[band_number]
             corrected_band = hedley_c(R,G,b,self.R_min)
+            # corrected_band = hedley_c(R,G,b)
             corrected_bands.append(corrected_band)
             
             axes[band_number,0].imshow(self.im_aligned[:,:,band_number],vmin=0,vmax=1)
@@ -679,6 +681,8 @@ class HedleyMulti:
     def simulate_glint(self, background_spectral=None,plot=True):
         """
         simulate glint on a known background reference
+        glint is simulated on all bands
+        returns simulated glint of dimension mxnx10
         """
         if background_spectral is None:
             background_spectral = [0.19503655,
@@ -724,3 +728,5 @@ class HedleyMulti:
         else:
             plt.close()
         return background_im
+
+
