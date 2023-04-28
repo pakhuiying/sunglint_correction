@@ -133,10 +133,13 @@ class HedleyMulti:
     
     def otsu_thresholding(self,im,plot=True):
         """
+        :param im (np.ndarray) of shape mxn
         otsu thresholding with Brent's minimisation of a univariate function
         returns the value of the threshold for input
         """
-        count,bin,_ = plt.hist(im.flatten(),bins='auto')
+        # count,bin,_ = plt.hist(im.flatten(),bins='auto')
+        auto_bins = int(0.005*im.shape[0]*im.shape[1])
+        count,bin,_ = plt.hist(im.flatten(),bins=auto_bins)
         plt.close()
         
         hist_norm = count/count.sum() #normalised histogram
@@ -210,9 +213,9 @@ class HedleyMulti:
         """
         if self.bbox is not None:
             ((x1,y1),(x2,y2)) = self.bbox
-        fig, axes = plt.subplots(10,2,figsize=(8,20))
+        # fig, axes = plt.subplots(10,2,figsize=(8,20))
         glint_mask_list = []
-        glint_threshold = []
+        # glint_threshold = []
         for i in range(self.im_aligned.shape[-1]):
             im_copy = self.im_aligned[:,:,i].copy()
             # find the laplacian of gaussian first
@@ -229,39 +232,39 @@ class HedleyMulti:
             # note this doesnt represent the glint magnitude
             im_smooth = im_smooth/np.max(im_smooth)
             
-            im = axes[i,0].imshow(im_copy)
-            divider = make_axes_locatable(axes[i,0])
-            cax = divider.append_axes('right', size='5%', pad=0.05)
-            fig.colorbar(im,cax=cax,orientation='vertical')
+            # im = axes[i,0].imshow(im_copy)
+            # divider = make_axes_locatable(axes[i,0])
+            # cax = divider.append_axes('right', size='5%', pad=0.05)
+            # fig.colorbar(im,cax=cax,orientation='vertical')
 
             #threshold mask
             thresh = self.otsu_thresholding(im_smooth,plot=plot)
-            glint_threshold.append(thresh)
+            # glint_threshold.append(thresh)
             glint_mask = np.where(im_smooth>thresh,1,0)
             glint_mask_list.append(glint_mask)
 
-            im = axes[i,1].imshow(glint_mask)
-            if self.bbox is not None:
-                avg_G = np.mean(glint_mask[y1:y2,x1:x2])
-                axes[i,1].set_title(f'mean G {avg_G:.3f}, thresh: {thresh:.3f}\n(Band {self.wavelength_dict[i]} nm)')
-            else:
-                axes[i,1].set_title(f'thresh: {thresh:.3f}\n(Band {self.wavelength_dict[i]} nm)')
-            divider = make_axes_locatable(axes[i,1])
-            cax = divider.append_axes('right', size='5%', pad=0.05)
-            fig.colorbar(im,cax=cax,orientation='vertical')
-            if self.bbox is not None:
-                coord, w, h = mutils.bboxes_to_patches(self.bbox)
-                rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
-                axes[i,1].add_patch(rect)
+        #     im = axes[i,1].imshow(glint_mask)
+        #     if self.bbox is not None:
+        #         avg_G = np.mean(glint_mask[y1:y2,x1:x2])
+        #         axes[i,1].set_title(f'mean G {avg_G:.3f}, thresh: {thresh:.3f}\n(Band {self.wavelength_dict[i]} nm)')
+        #     else:
+        #         axes[i,1].set_title(f'thresh: {thresh:.3f}\n(Band {self.wavelength_dict[i]} nm)')
+        #     divider = make_axes_locatable(axes[i,1])
+        #     cax = divider.append_axes('right', size='5%', pad=0.05)
+        #     fig.colorbar(im,cax=cax,orientation='vertical')
+        #     if self.bbox is not None:
+        #         coord, w, h = mutils.bboxes_to_patches(self.bbox)
+        #         rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
+        #         axes[i,1].add_patch(rect)
         
-        if plot is True:
-            for ax in axes.flatten():
-                ax.axis('off')
-            plt.show()
-        else:
-            plt.close()
+        # if plot is True:
+        #     for ax in axes.flatten():
+        #         ax.axis('off')
+        #     plt.show()
+        # else:
+        #     plt.close()
 
-        self.glint_threshold = glint_threshold
+        # self.glint_threshold = glint_threshold
 
         return glint_mask_list
     
@@ -524,7 +527,7 @@ class HedleyMulti:
         # avg_reflectance = []
         # avg_reflectance_corrected = []
 
-        fig, axes = plt.subplots(self.n_bands,2,figsize=(10,20))
+        # fig, axes = plt.subplots(self.n_bands,2,figsize=(10,20))
         for band_number in range(self.n_bands):
             b = b_list[band_number]
             R = self.im_aligned[:,:,band_number]
@@ -532,20 +535,19 @@ class HedleyMulti:
             corrected_band = hedley_c(R,G,b,self.R_min)
             # corrected_band = hedley_c(R,G,b)
             corrected_bands.append(corrected_band)
-            
-            axes[band_number,0].imshow(self.im_aligned[:,:,band_number],vmin=0,vmax=1)
-            axes[band_number,1].imshow(corrected_band,vmin=0,vmax=1)
-            axes[band_number,0].set_title(f'Band {self.wavelength_dict[band_number]} reflectance')
-            axes[band_number,1].set_title(f'Band {self.wavelength_dict[band_number]} reflectance corrected')
-
+        
         if plot is True:
+            fig, axes = plt.subplots(self.n_bands,2,figsize=(10,20))
+            for band_number in range(self.n_bands):
+                axes[band_number,0].imshow(self.im_aligned[:,:,band_number],vmin=0,vmax=1)
+                axes[band_number,1].imshow(corrected_bands[band_number],vmin=0,vmax=1)
+                axes[band_number,0].set_title(f'Band {self.wavelength_dict[band_number]} reflectance')
+                axes[band_number,1].set_title(f'Band {self.wavelength_dict[band_number]} reflectance corrected')
+        
             for ax in axes.flatten():
                 ax.axis('off')
             plt.tight_layout()
             plt.show()
-
-        else:
-            plt.close()
 
         return corrected_bands
     
@@ -655,22 +657,22 @@ class HedleyMulti:
             ax.axis('off')
         plt.tight_layout()
 
-        if save_dir is None:
-            #create a new dir to store plot images
-            save_dir = os.path.join(os.getcwd(),"corrected_images")
-            if not os.path.exists(save_dir):
-                os.mkdir(save_dir)
-        else:
+        # if save_dir is None:
+        #     #create a new dir to store plot images
+        #     save_dir = os.path.join(os.getcwd(),"corrected_images")
+        #     if not os.path.exists(save_dir):
+        #         os.mkdir(save_dir)
+        if save_dir is not None:
             save_dir = os.path.join(save_dir,"corrected_images")
             if not os.path.exists(save_dir):
                 os.mkdir(save_dir)
 
-        filename = mutils.get_all_dir(filename,iter=4)
-        filename = os.path.splitext(filename)[0]
-        full_fn = os.path.join(save_dir,filename)
+            filename = mutils.get_all_dir(filename,iter=4)
+            filename = os.path.splitext(filename)[0]
+            full_fn = os.path.join(save_dir,filename)
 
-        fig.suptitle(filename)
-        fig.savefig('{}.png'.format(full_fn))
+            fig.suptitle(filename)
+            fig.savefig('{}.png'.format(full_fn))
 
         if plot is True:
             plt.show()
