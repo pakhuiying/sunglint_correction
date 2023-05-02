@@ -484,7 +484,8 @@ class HedleyMulti:
             G = glint_mask
             R = im
             im_corrected = hedley_c(R,G,b,self.R_min)
-            return np.var(im_corrected)
+            # var_laplace = laplace(im_corrected).var()
+            return np.var(im_corrected)#*var_laplace
 
         res = minimize_scalar(optimise_b, bounds=(0.5, 1.5), method='bounded')
         return res.x

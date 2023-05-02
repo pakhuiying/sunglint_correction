@@ -222,3 +222,93 @@ class SimulateGlint:
         else:
             plt.close()
         return
+    
+class SimulateBackground:
+    """
+    :param background_fp (str): filepath to a pickle file of water spectra
+    :param turbid_fp (str): filepath to a pickle file of turbid spectra
+    :param glint_fp (str): filepath to a pickle file of extracted glint
+    :param bboxes_list (list of tuple): where each tuple is ((x1,y1),(x2,y2)) to superimpose turbid spectra over water spectra
+    :param y_line (float): get spectra on a horizontal cross-section
+    :param sigma (int): sigma for gaussian filtering to blend turbid into background spectra
+    :param x_range (tuple or list): set x_limit for displaying spectra
+    :TODO randomly generate integers within the shape of im_aligned to randomly generate tuples
+    :TODO add glint spectra on top of background spectra instead of replacing it
+    """
+    def __init__(self,background_fp,
+                 turbid_fp,
+                 glint_fp,
+                 bboxes_list,y_line=None,sigma=20,x_range=None):
+        
+        self.background_fp = background_fp
+        self.turbid_fp = turbid_fp
+        self.glint_fp = glint_fp
+        self.bboxes_list = bboxes_list
+        self.y_line = y_line
+        self.sigma = sigma
+        self.x_range = x_range
+    
+    def simulation(self):
+        """
+        returns simulated_background, simulated_glint, and corrected_img
+        """
+        water_spectra = mutils.load_pickle(self.background_fp)
+        turbid_spectra = mutils.load_pickle(self.turbid_fp)
+        glint = mutils.load_pickle(self.glint_fp)
+
+        nrow,ncol = glint.shape[0],glint.shape[1]
+
+        water_spectra = np.tile(water_spectra,(nrow,ncol,1))
+        
+        for bbox in self.bboxes_list:
+            ((x1,y1),(x2,y2)) = bbox
+            water_spectra[y1:y2,x1:x2,:] = turbid_spectra
+        
+        for i in range(water_spectra.shape[-1]):
+            water_spectra[:,:,i] = gaussian_filter(water_spectra[:,:,i],sigma=self.sigma)
+        
+        # add simulated glint, add the signal from glint + background water spectra
+        simulated_glint = water_spectra.copy()
+        
+        simulated_glint[glint>0] = glint[glint>0] + water_spectra[glint>0]
+
+        # apply SUGAR on simulated glint
+        # get corrected_bands
+        HM = HedleyMulti.HedleyMulti(simulated_glint,None, sigma=1)
+        corrected_bands = HM.get_corrected_bands(plot=False)
+        corrected_bands = np.stack(corrected_bands,axis=2)
+
+        im_list = {'Simulated background':water_spectra,
+                'Simulated glint': simulated_glint,
+                'Corrected for glint': corrected_bands}
+        
+        rgb_bands = [2,1,0]
+
+        fig, axes = plt.subplots(3,2,figsize=(11,13))
+
+        for i,(title, im) in enumerate(im_list.items()):
+            im_cropped = np.take(im,rgb_bands,axis=2)
+            axes[i,0].imshow(im_cropped)
+            axes[i,0].plot([0,ncol-1],[self.y_line]*2,c='r',ls='--',alpha=0.5)
+            for j,c in zip(rgb_bands,['r','g','b']):
+                # plot reflectance for each band along red line
+                axes[i,1].plot(list(range(ncol)),im[self.y_line,:,j],c=c,alpha=0.5)
+            for ax in axes[i,:]:
+                ax.set_title(title)
+
+        # for ax in axes[:,0]:
+        #     ax.axis('off')
+        for ax in axes[:,1]:
+            ax.set_xlabel("Pixels along red line")
+            ax.set_ylabel("Reflectance")
+            ax.set_ylim(0,1)
+            if self.x_range is not None:
+                ax.set_xlim(self.x_range[0],self.x_range[1])
+                
+
+        plt.tight_layout()
+        plt.show()
+
+        return im_list
+
+        
