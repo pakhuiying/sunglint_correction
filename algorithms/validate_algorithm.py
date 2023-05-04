@@ -233,7 +233,6 @@ class SimulateBackground:
     :param sigma (int): sigma for gaussian filtering to blend turbid into background spectra
     :param x_range (tuple or list): set x_limit for displaying spectra
     :TODO randomly generate integers within the shape of im_aligned to randomly generate tuples
-    :TODO add glint spectra on top of background spectra instead of replacing it
     """
     def __init__(self,background_fp,
                  turbid_fp,
@@ -328,4 +327,73 @@ class SimulateBackground:
 
         return im_list
 
+def glint_vs_corrected(glint_im,corrected_glint,glint_mask=None,no_glint=None):
+    """
+    :param glint_im (np.ndarray): original image with glint
+    :param corrected_glint (np.ndarray): image corrected for glint
+    :param no_glint (np.ndarray): Optional ground-truth input, only if the images are simulated
+    """
+    n = glint_im.shape[-1]
+    simulated_background = no_glint
+    simulated_glint = glint_im
+    
+    if no_glint is None:
+        fig, axes = plt.subplots(n,1,figsize=(7,20))
+    else:
+        fig, axes = plt.subplots(n,4,figsize=(15,25))
         
+    for i in range(n):
+        if glint_mask is not None:
+            gm = glint_mask[:,:,i]
+        # check how much glint has been removed
+        correction_mag = simulated_glint[:,:,i] - corrected_glint[:,:,i]
+        if glint_mask is None:
+            # glint + water background
+            extracted_glint = simulated_glint[:,:,i].flatten()
+            extracted_correction = correction_mag.flatten()
+        else:
+            extracted_glint = simulated_glint[:,:,i][gm!=0]
+            extracted_correction = correction_mag[gm!=0]
+
+        if no_glint is not None:
+            # actual glint contribution
+            glint_original_glint = simulated_glint[:,:,i] - simulated_background[:,:,i]
+            # how much glint is under/overcorrected i.e. ground truth vs corrected
+            residual_glint = corrected_glint[:,:,i] - simulated_background[:,:,i]
+            if glint_mask is None:
+                extracted_original_glint = glint_original_glint.flatten()
+                extracted_residual_glint = residual_glint.flatten()
+            else:
+                extracted_original_glint = glint_original_glint[gm!=0]
+                extracted_residual_glint = residual_glint[gm!=0]
+            # colors are indicated by residual glint
+            # check how much glint has been removed
+            im = axes[i,0].scatter(extracted_glint,extracted_correction,c=extracted_residual_glint,alpha=0.3,s=1)
+            fig.colorbar(im, ax=axes[i,0])
+            # check how much glint has been removed vs actual glint contribution
+            axes[i,1].scatter(extracted_glint,extracted_original_glint,c=extracted_residual_glint,alpha=0.3,s=1)
+            axes[i,1].set_xlabel('Glint magnitude')
+            axes[i,1].set_ylabel('Glint contribution')
+
+            axes[i,2].imshow(simulated_glint[:,:,i])
+            axes[i,2].set_title(f'Original image (Band {i})')
+
+            im = axes[i,3].imshow(residual_glint,interpolation='none')
+            fig.colorbar(im, ax=axes[i,3])
+            axes[i,3].set_title(f'Residual glint (Band {i})')
+
+            axes[i,0].set_title(f'Band {i}')
+            axes[i,0].set_xlabel('Glint magnitude')
+            axes[i,0].set_ylabel('Glint Correction')
+        
+        else:
+            axes[i].scatter(extracted_glint,extracted_correction,s=1)
+            axes[i].set_title(f'Band {i}')
+            axes[i].set_xlabel('Glint magnitude')
+            axes[i].set_ylabel('Glint Correction')
+        
+        
+    
+    plt.tight_layout()
+    plt.show()
+    return 
