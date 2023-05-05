@@ -248,18 +248,16 @@ class SimulateBackground:
         self.x_range = x_range
     
     def correction_iterative(self,glint_image,iter=3):
-        fig, axes = plt.subplots(iter+1,1)
-        axes[0].imshow(np.take(glint_image,[2,1,0],axis=2))
-        axes[0].set_title(f'Original image (var: {np.var(glint_image):.4f})')
-        axes[0].axis('off')
+        
         for i in range(iter):
             HM = HedleyMulti.HedleyMulti(glint_image,None)
             corrected_bands = HM.get_corrected_bands(plot=False)
             glint_image = np.stack(corrected_bands,axis=2)
-            axes[i+1].set_title(f'after var: {np.var(glint_image):.4f}')
-            axes[i+1].imshow(np.take(glint_image,[2,1,0],axis=2))
-            axes[i+1].axis('off')
-        plt.show()
+            plt.figure()
+            plt.title(f'after var: {np.var(glint_image):.4f}')
+            plt.imshow(np.take(glint_image,[2,1,0],axis=2))
+            plt.axis('off')
+            plt.show()
         return glint_image
 
     def simulation(self,iter=1):
