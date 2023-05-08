@@ -14,7 +14,7 @@ import shutil
 import mutils
 import extract_spectral as espect
 import algorithms.Hedley as Hedley
-import algorithms.Hedley_multiband as HedleyMulti
+import algorithms.SUGAR as sugar
 from scipy.ndimage import gaussian_filter,laplace, gaussian_laplace
 from scipy.optimize import minimize_scalar
 
@@ -161,7 +161,7 @@ class SimulateGlint:
         background_spectral = np.tile(background_spectral,(simulated_glint.shape[0],simulated_glint.shape[1],1))
         
         # get corrected_bands
-        HM = HedleyMulti.HedleyMulti(simulated_glint,None, sigma=sigma)
+        HM = sugar.SUGAR(simulated_glint,None, sigma=sigma)
         corrected_bands = HM.get_corrected_bands(plot=False)
         corrected_bands = np.stack(corrected_bands,axis=2)
 
@@ -237,33 +237,40 @@ class SimulateBackground:
     def __init__(self,background_fp,
                  turbid_fp,
                  glint_fp,
-                 bboxes_list,y_line=None,sigma=20,x_range=None):
+                 bboxes_list,
+                 estimate_background=True,
+                 iter=3,
+                 y_line=None,sigma=20,x_range=None):
         
         self.background_fp = background_fp
         self.turbid_fp = turbid_fp
         self.glint_fp = glint_fp
         self.bboxes_list = bboxes_list
+        self.estimate_background = estimate_background
+        self.iter = iter
         self.y_line = y_line
         self.sigma = sigma
         self.x_range = x_range
     
-    def correction_iterative(self,glint_image,iter=3):
-        
-        for i in range(iter):
-            HM = HedleyMulti.HedleyMulti(glint_image,None)
-            corrected_bands = HM.get_corrected_bands(plot=False)
+    def correction_iterative(self,glint_image,bounds = [(1,2)]*10):
+        for i in range(self.iter):
+            HM = sugar.SUGAR(glint_image,bounds,estimate_background=self.estimate_background)
+            corrected_bands = HM.get_corrected_bands()
             glint_image = np.stack(corrected_bands,axis=2)
             plt.figure()
             plt.title(f'after var: {np.var(glint_image):.4f}')
             plt.imshow(np.take(glint_image,[2,1,0],axis=2))
             plt.axis('off')
             plt.show()
+            b_list = HM.b_list
+            bounds = [(1,b*1.2) for b in b_list]
+        
         return glint_image
 
-    def simulation(self,iter=1):
+    def simulate_background(self):
         """
         :param iter (int): number of iterations to run the correction
-        returns simulated_background, simulated_glint, and corrected_img
+        returns simulated_background, simulated_glint
         """
         water_spectra = mutils.load_pickle(self.background_fp)
         turbid_spectra = mutils.load_pickle(self.turbid_fp)
@@ -285,9 +292,22 @@ class SimulateBackground:
         
         simulated_glint[glint>0] = glint[glint>0] + water_spectra[glint>0]
 
+        return {'Simulated background':water_spectra,
+                'Simulated glint': simulated_glint}
+    
+    def simulation(self):
+        """
+        :param iter (int): number of iterations to run the correction
+        returns simulated_background, simulated_glint, and corrected_img
+        """
+        simulated_im = self.simulate_background()
+        water_spectra = simulated_im['Simulated background']
+        simulated_glint = simulated_im['Simulated glint']
+
+        nrow,ncol = simulated_glint.shape[0],simulated_glint.shape[1]
         # apply SUGAR on simulated glint
         # get corrected_bands
-        corrected_bands = self.correction_iterative(simulated_glint,iter=iter)
+        corrected_bands = self.correction_iterative(simulated_glint)
         # HM = HedleyMulti.HedleyMulti(simulated_glint,None, sigma=1)
         # corrected_bands = HM.get_corrected_bands(plot=False)
         # corrected_bands = np.stack(corrected_bands,axis=2)
