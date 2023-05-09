@@ -345,73 +345,164 @@ class SimulateBackground:
 
         return im_list
 
-def glint_vs_corrected(glint_im,corrected_glint,glint_mask=None,no_glint=None):
-    """
-    :param glint_im (np.ndarray): original image with glint
-    :param corrected_glint (np.ndarray): image corrected for glint
-    :param no_glint (np.ndarray): Optional ground-truth input, only if the images are simulated
-    """
-    n = glint_im.shape[-1]
-    simulated_background = no_glint
-    simulated_glint = glint_im
-    
-    if no_glint is None:
-        fig, axes = plt.subplots(n,1,figsize=(7,20))
-    else:
-        fig, axes = plt.subplots(n,4,figsize=(15,25))
-        
-    for i in range(n):
-        if glint_mask is not None:
-            gm = glint_mask[:,:,i]
-        # check how much glint has been removed
-        correction_mag = simulated_glint[:,:,i] - corrected_glint[:,:,i]
-        if glint_mask is None:
-            # glint + water background
-            extracted_glint = simulated_glint[:,:,i].flatten()
-            extracted_correction = correction_mag.flatten()
-        else:
-            extracted_glint = simulated_glint[:,:,i][gm!=0]
-            extracted_correction = correction_mag[gm!=0]
+class EvaluateCorrection:
+    def __init__(self,glint_im,corrected_glint,glint_mask=None,no_glint=None):
+        """
+        :param glint_im (np.ndarray): original image with glint
+        :param corrected_glint (np.ndarray): image corrected for glint
+        :param glint_mask (np.ndarray): glint mask where 1 is glint and 0 is non-glint
+        :param no_glint (np.ndarray): Optional ground-truth input, only if the images are simulated
+        """
+        self.glint_im = glint_im
+        self.corrected_glint = corrected_glint
+        self.glint_mask = glint_mask
+        self.no_glint = no_glint
+        self.n_bands = glint_im.shape[-1]
+        # import wavelengths for each band
+        wavelengths = mutils.sort_bands_by_wavelength()
+        self.wavelength_dict = {i[0]:i[1] for i in wavelengths}
 
-        if no_glint is not None:
-            # actual glint contribution
-            glint_original_glint = simulated_glint[:,:,i] - simulated_background[:,:,i]
-            # how much glint is under/overcorrected i.e. ground truth vs corrected
-            residual_glint = corrected_glint[:,:,i] - simulated_background[:,:,i]
-            if glint_mask is None:
-                extracted_original_glint = glint_original_glint.flatten()
-                extracted_residual_glint = residual_glint.flatten()
-            else:
-                extracted_original_glint = glint_original_glint[gm!=0]
-                extracted_residual_glint = residual_glint[gm!=0]
-            # colors are indicated by residual glint
+    def correction_stats(self,bbox):
+        """
+        :param bbox (tuple): ((x1,y1),(x2,y2)), where x1,y1 is the upper left corner, x2,y2 is the lower right corner
+        Show corrected and original rgb image, mean reflectance
+        """
+        ((x1,y1),(x2,y2)) = bbox
+        
+        rgb_bands = [2,1,0]
+
+        fig, axes = plt.subplots(2,4,figsize=(14,10))
+        #non-corrected images and reflectance for bbox
+        rgb_im = np.take(self.glint_im,rgb_bands,axis=2)
+        glint_area = self.glint_im[y1:y2,x1:x2,:]
+        avg_reflectance = [np.mean(glint_area[:,:,band_number]) for band_number in range(self.n_bands)]
+        
+        #corrected images and reflectance for bbox
+        rgb_im_corrected = np.stack([self.corrected_glint[:,:,i] for i in rgb_bands],axis=2)
+        avg_reflectance_corrected = [np.mean(self.corrected_glint[y1:y2,x1:x2,band_number]) for band_number in range(self.n_bands)]
+        
+        # plot original rgb
+        axes[0,0].imshow(rgb_im)
+        axes[0,0].set_title('Original RGB')
+        coord, w, h = mutils.bboxes_to_patches(bbox)
+        rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
+        axes[0,0].add_patch(rect)
+        # plot corrected rgb
+        axes[0,1].imshow(rgb_im_corrected)
+        axes[0,1].set_title('Corrected RGB')
+        rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
+        axes[0,1].add_patch(rect)
+        # reflectance
+        axes[0,2].plot(list(self.wavelength_dict.values()),[avg_reflectance[i] for i in list(self.wavelength_dict)], label='Original')
+        axes[0,2].plot(list(self.wavelength_dict.values()),[avg_reflectance_corrected[i] for i in list(self.wavelength_dict)], label='Corrected')
+        axes[0,2].set_xlabel('Wavelengths (nm)')
+        axes[0,2].set_ylabel('Reflectance')
+        axes[0,2].legend(loc='upper right')
+        axes[0,2].set_title(r'$R_T(\lambda)$ and $R_T(\lambda)\prime$')
+
+        residual = [og-cor for og,cor in zip(avg_reflectance,avg_reflectance_corrected)]
+        axes[0,3].plot(list(self.wavelength_dict.values()),[residual[i] for i in list(self.wavelength_dict)])
+        axes[0,3].set_xlabel('Wavelengths (nm)')
+        axes[0,3].set_ylabel('Residual in Reflectance')
+        axes[0,3].set_title(r'$R_T(\lambda) - R_T(\lambda)\prime$')
+
+        for ax in axes[0,:2]:
+            ax.axis('off')
+        
+        h = y2 - y1
+        w = x2 - x1
+
+        axes[1,0].imshow(rgb_im[y1:y2,x1:x2,:])
+        axes[1,1].imshow(rgb_im_corrected[y1:y2,x1:x2,:])
+        axes[1,0].set_title('Original Glint')
+        axes[1,1].set_title('Corrected Glint')
+
+        axes[1,0].plot([0,w],[h//2,h//2],color="red",linewidth=3,alpha=0.5)
+        axes[1,1].plot([0,w],[h//2,h//2],color="red",linewidth=3,alpha=0.5)
+        
+        # for ax in axes[1,0:2]:
+        #     ax.axis('off')
+
+        for i,c in zip(range(3),['r','g','b']):
+            # plot for original
+            axes[1,2].plot(list(range(w)),rgb_im[y1:y2,x1:x2,:][h//2,:,i],c=c,alpha=0.5,label=c)
+            # plot for corrected reflectance
+            axes[1,3].plot(list(range(w)),rgb_im_corrected[y1:y2,x1:x2,:][h//2,:,i],c=c,alpha=0.5,label=c)
+
+        for ax in axes[1,2:]:
+            ax.set_xlabel('Width of image')
+            ax.set_ylabel('Reflectance')
+            ax.legend(loc="upper right")
+
+        axes[1,2].set_title(r'$R_T(\lambda)$ along red line')
+        axes[1,3].set_title(r'$R_T(\lambda)\prime$ along red line')
+
+        plt.tight_layout()
+        plt.show()
+
+        return
+    
+    def glint_vs_corrected(self):
+        """ plot scatter plot of glint correction vs glint magnitude"""
+        n = self.glint_im.shape[-1]
+        simulated_background = self.no_glint
+        simulated_glint = self.glint_im
+        
+        if self.no_glint is None:
+            fig, axes = plt.subplots(n,1,figsize=(7,20))
+        else:
+            fig, axes = plt.subplots(n,4,figsize=(15,25))
+            
+        for i in range(n):
+            if self.glint_mask is not None:
+                gm = self.glint_mask[:,:,i]
             # check how much glint has been removed
-            im = axes[i,0].scatter(extracted_glint,extracted_correction,c=extracted_residual_glint,alpha=0.3,s=1)
-            fig.colorbar(im, ax=axes[i,0])
-            # check how much glint has been removed vs actual glint contribution
-            axes[i,1].scatter(extracted_glint,extracted_original_glint,c=extracted_residual_glint,alpha=0.3,s=1)
-            axes[i,1].set_xlabel('Glint magnitude')
-            axes[i,1].set_ylabel('Glint contribution')
+            correction_mag = simulated_glint[:,:,i] - self.corrected_glint[:,:,i]
+            if self.glint_mask is None:
+                # glint + water background
+                extracted_glint = simulated_glint[:,:,i].flatten()
+                extracted_correction = correction_mag.flatten()
+            else:
+                extracted_glint = simulated_glint[:,:,i][gm!=0]
+                extracted_correction = correction_mag[gm!=0]
 
-            axes[i,2].imshow(simulated_glint[:,:,i])
-            axes[i,2].set_title(f'Original image (Band {i})')
+            if self.no_glint is not None:
+                # actual glint contribution
+                glint_original_glint = simulated_glint[:,:,i] - simulated_background[:,:,i]
+                # how much glint is under/overcorrected i.e. ground truth vs corrected
+                residual_glint = self.corrected_glint[:,:,i] - simulated_background[:,:,i]
+                if self.glint_mask is None:
+                    extracted_original_glint = glint_original_glint.flatten()
+                    extracted_residual_glint = residual_glint.flatten()
+                else:
+                    extracted_original_glint = glint_original_glint[gm!=0]
+                    extracted_residual_glint = residual_glint[gm!=0]
+                # colors are indicated by residual glint
+                # check how much glint has been removed
+                im = axes[i,0].scatter(extracted_glint,extracted_correction,c=extracted_residual_glint,alpha=0.3,s=1)
+                fig.colorbar(im, ax=axes[i,0])
+                # check how much glint has been removed vs actual glint contribution
+                axes[i,1].scatter(extracted_glint,extracted_original_glint,c=extracted_residual_glint,alpha=0.3,s=1)
+                axes[i,1].set_xlabel('Glint magnitude')
+                axes[i,1].set_ylabel('Glint contribution')
 
-            im = axes[i,3].imshow(residual_glint,interpolation='none')
-            fig.colorbar(im, ax=axes[i,3])
-            axes[i,3].set_title(f'Residual glint (Band {i})')
+                axes[i,2].imshow(simulated_glint[:,:,i])
+                axes[i,2].set_title(f'Original image (Band {i})')
 
-            axes[i,0].set_title(f'Band {i}')
-            axes[i,0].set_xlabel('Glint magnitude')
-            axes[i,0].set_ylabel('Glint Correction')
-        
-        else:
-            axes[i].scatter(extracted_glint,extracted_correction,s=1)
-            axes[i].set_title(f'Band {i}')
-            axes[i].set_xlabel('Glint magnitude')
-            axes[i].set_ylabel('Glint Correction')
-        
-        
-    
-    plt.tight_layout()
-    plt.show()
-    return 
+                im = axes[i,3].imshow(residual_glint,interpolation='none')
+                fig.colorbar(im, ax=axes[i,3])
+                axes[i,3].set_title(f'Residual glint (Band {i})')
+
+                axes[i,0].set_title(f'Band {i}')
+                axes[i,0].set_xlabel('Glint magnitude')
+                axes[i,0].set_ylabel('Glint Correction')
+            
+            else:
+                axes[i].scatter(extracted_glint,extracted_correction,s=1)
+                axes[i].set_title(f'Band {i}')
+                axes[i].set_xlabel('Glint magnitude')
+                axes[i].set_ylabel('Glint Correction')
+            
+        plt.tight_layout()
+        plt.show()
+        return 
