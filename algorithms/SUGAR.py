@@ -1,18 +1,9 @@
-# import micasense.imageset as imageset
-import micasense.capture as capture
 import cv2
-import micasense.imageutils as imageutils
 # import micasense.plotutils as plotutils
 import os, glob
 import json
 from tqdm import tqdm
 # import pickle #This library will maintain the format as well
-import importlib
-import radiometric_calib_utils
-import mutils
-importlib.reload(radiometric_calib_utils)
-importlib.reload(mutils)
-import radiometric_calib_utils as rcu
 import mutils
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -21,10 +12,6 @@ from matplotlib.collections import LineCollection
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
-from math import ceil
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import r2_score
-from scipy.stats.stats import pearsonr
 from scipy.stats import gaussian_kde
 from scipy import ndimage
 from scipy.optimize import minimize_scalar
@@ -131,7 +118,7 @@ class SUGAR:
 
         return glint_mask
     
-    def get_est_background(self, im,k_size=7):
+    def get_est_background(self, im,k_size=5):
         """ 
         :param im (np.ndarray): image of a band
         estimate background spectra
@@ -202,8 +189,10 @@ class SUGAR:
             b = self.optimise_correction_by_band(self.im_aligned[:,:,i],glint_mask,est_background,bounds)
             b_list.append(b)
         
-        # add attribute
+        # add attributes
         self.b_list = b_list
+        self.glint_mask = np.stack(glint_mask_list,axis=2)
+        self.est_background = np.stack(est_background_list,axis=2)
 
         return b_list, glint_mask_list, est_background_list
     
