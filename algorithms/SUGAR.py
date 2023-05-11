@@ -384,7 +384,7 @@ def correction_iterative(im_aligned,iter=3,bounds = [(1,2)]*10,estimate_backgrou
 
     if plot is True:
         nrows = ceil(len(corrected_images)/2)
-        fig, axes = plt.subplots(nrows,2,figsize=(12,5*nrows))
+        fig, axes = plt.subplots(nrows,2,figsize=(10,5*nrows))
         for i,(im, ax) in enumerate(zip(corrected_images,axes.flatten())):
             ax.set_title(f'Iter {i}' + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
             ax.imshow(np.take(im,[2,1,0],axis=2))
