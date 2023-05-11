@@ -15,6 +15,7 @@ import numpy as np
 from scipy.stats import gaussian_kde
 from scipy import ndimage
 from scipy.optimize import minimize_scalar
+from math import ceil
 
 # SUn-Glint-Aware Restoration (SUGAR):A sweet and simple algorithm for correcting sunglint
 class SUGAR:
@@ -380,12 +381,15 @@ def correction_iterative(im_aligned,iter=3,bounds = [(1,2)]*10,estimate_backgrou
         corrected_bands = HM.get_corrected_bands()
         glint_image = np.stack(corrected_bands,axis=2)
         corrected_images.append(glint_image)
-        if plot is True:
-            plt.figure()
-            plt.title(f'after var: {np.var(glint_image):.4f}')
-            plt.imshow(np.take(glint_image,[2,1,0],axis=2))
-            plt.axis('off')
-            plt.show()
+
+    if plot is True:
+        nrows = ceil(len(corrected_images)/2)
+        fig, axes = plt.subplots(nrows,2,figsize=(12,5*nrows))
+        for i,(im, ax) in enumerate(zip(corrected_images,axes.flatten())):
+            ax.set_title(f'Iter {i}' + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
+            ax.imshow(np.take(im,[2,1,0],axis=2))
+            ax.axis('off')
+        plt.show()
         # b_list = HM.b_list
         # bounds = [(1,b*1.2) for b in b_list]
     
