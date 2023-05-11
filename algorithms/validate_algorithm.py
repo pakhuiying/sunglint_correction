@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import PIL.Image as Image
+from skimage.transform import swirl
 import json
 import glob
 import shutil
@@ -252,16 +253,17 @@ class SimulateBackground:
         self.sigma = sigma
         self.x_range = x_range
     
-    def correction_iterative(self,glint_image,bounds = [(1,2)]*10):
+    def correction_iterative(self,glint_image,bounds = [(1,2)]*10,plot=False):
         for i in range(self.iter):
             HM = sugar.SUGAR(glint_image,bounds,estimate_background=self.estimate_background)
             corrected_bands = HM.get_corrected_bands()
             glint_image = np.stack(corrected_bands,axis=2)
-            plt.figure()
-            plt.title(f'after var: {np.var(glint_image):.4f}')
-            plt.imshow(np.take(glint_image,[2,1,0],axis=2))
-            plt.axis('off')
-            plt.show()
+            if plot is True:
+                plt.figure()
+                plt.title(f'after var: {np.var(glint_image):.4f}')
+                plt.imshow(np.take(glint_image,[2,1,0],axis=2))
+                plt.axis('off')
+                plt.show()
             b_list = HM.b_list
             bounds = [(1,b*1.2) for b in b_list]
         
@@ -345,6 +347,32 @@ class SimulateBackground:
 
         return im_list
 
+class GloriaSimulate:
+    """
+    simulate different water spectra from different water body types and water types using GLORIA dataset
+    Lehmann, Moritz K; Gurlin, Daniela; Pahlevan, Nima; Alikas, Krista; Anstee, Janet M; Balasubramanian, Sundarabalan V; Barbosa, Cláudio C F; Binding, Caren; Bracher, Astrid; Bresciani, Mariano; Burtner, Ashley; Cao, Zhigang; Conroy, Ted; Dekker, Arnold G; Di Vittorio, Courtney; Drayson, Nathan; Errera, Reagan M; Fernandez, Virginia; Ficek, Dariusz; Fichot, Cédric G; Gege, Peter; Giardino, Claudia; Gitelson, Anatoly A; Greb, Steven R; Henderson, Hayden; Higa, Hiroto; Irani Rahaghi, Abolfazl; Jamet, Cédric; Jiang, Dalin; Jordan, Thomas; Kangro, Kersti; Kravitz, Jeremy A; Kristoffersen, Arne S; Kudela, Raphael; Li, Lin; Ligi, Martin; Loisel, Hubert; Lohrenz, Steven; Ma, Ronghua; Maciel, Daniel A; Malthus, Tim J; Matsushita, Bunkei; Matthews, Mark; Minaudo, Camille; Mishra, Deepak R; Mishra, Sachidananda; Moore, Tim; Moses, Wesley J; Nguyen, Hà; Novo, Evlyn M L M; Novoa, Stéfani; Odermatt, Daniel; O'Donnell, David M; Olmanson, Leif G; Ondrusek, Michael; Oppelt, Natascha; Ouillon, Sylvain; Pereira Filho, Waterloo; Plattner, Stefan; Ruiz Verdú, Antonio; Salem, Salem I; Schalles, John F; Simis, Stefan G H; Siswanto, Eko; Smith, Brandon; Somlai-Schweiger, Ian; Soppa, Mariana A; Spyrakos, Evangelos; Tessin, Elinor; van der Woerd, Hendrik J; Vander Woude, Andrea J; Vandermeulen, Ryan A; Vantrepotte, Vincent; Wernand, Marcel Robert; Werther, Mortimer; Young, Kyana; Yue, Linwei (2022)
+    : GLORIA - A global dataset of remote sensing reflectance and water quality from inland and coastal waters. PANGAEA, https://doi.org/10.1594/PANGAEA.948492
+    :TODO
+    """
+    def __init__(self,fp):
+        """
+        :param fp (str): folder path to GLORIA dataset
+        """
+    
+    def import_GLORIA(self):
+        """
+        import GLORIA datasets as pd dataframe
+        """
+    
+    def image_distortion(self,im,rotation=0,strength=10,radius=120):
+        """
+        to simulate non-homogenous background spectra
+        https://stackoverflow.com/questions/225548/resources-for-image-distortion-algorithms
+        https://scikit-image.org/docs/stable/auto_examples/transform/plot_swirl.html
+        """
+        swirled = swirl(im, rotation=rotation, strength=strength, radius=radius)
+
+    
 class EvaluateCorrection:
     def __init__(self,glint_im,corrected_glint,glint_mask=None,no_glint=None):
         """

@@ -191,8 +191,8 @@ class SUGAR:
         
         # add attributes
         self.b_list = b_list
-        self.glint_mask = np.stack(glint_mask_list,axis=2)
-        self.est_background = np.stack(est_background_list,axis=2)
+        self.glint_mask = glint_mask_list
+        self.est_background = est_background_list
 
         return b_list, glint_mask_list, est_background_list
     
@@ -366,17 +366,27 @@ class SUGAR:
             plt.close()
         return
 
-def correction_iterative(glint_image,iter=3,bounds = [(1,2)]*10,estimate_background=True):
+def correction_iterative(im_aligned,iter=3,bounds = [(1,2)]*10,estimate_background=True,plot=False):
+    """
+    :param im_aligned (np.ndarray)
+    :param iter (int): number of iterations to run the sugar algorithm
+    :bounds (list of tuples): to limit 
+    conducts iterative correction using SUGAR
+    """
+    glint_image = im_aligned.copy()
+    corrected_images = [glint_image]
     for i in range(iter):
         HM = SUGAR(glint_image,bounds,estimate_background=estimate_background)
         corrected_bands = HM.get_corrected_bands()
         glint_image = np.stack(corrected_bands,axis=2)
-        plt.figure()
-        plt.title(f'after var: {np.var(glint_image):.4f}')
-        plt.imshow(np.take(glint_image,[2,1,0],axis=2))
-        plt.axis('off')
-        plt.show()
-        b_list = HM.b_list
-        bounds = [(1,b*1.2) for b in b_list]
+        corrected_images.append(glint_image)
+        if plot is True:
+            plt.figure()
+            plt.title(f'after var: {np.var(glint_image):.4f}')
+            plt.imshow(np.take(glint_image,[2,1,0],axis=2))
+            plt.axis('off')
+            plt.show()
+        # b_list = HM.b_list
+        # bounds = [(1,b*1.2) for b in b_list]
     
-    return glint_image
+    return corrected_images
