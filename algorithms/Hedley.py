@@ -28,7 +28,7 @@ from scipy.stats import gaussian_kde
 from scipy.ndimage import gaussian_filter
 
 class Hedley:
-    def __init__(self, im_aligned,bbox,mode="regression",sigma=2,smoothing=True):
+    def __init__(self, im_aligned,bbox,mode="regression",sigma=2,smoothing=True,glint_mask=True):
         """
         :param im_aligned (np.ndarray): band aligned and calibrated & corrected reflectance image
         :param bbox (tuple): bbox of a glint area e.g. water_glint
@@ -37,6 +37,7 @@ class Hedley:
         :param smoothing (bool): whether to smooth images or not, due to the spatial offset in glint across diff bands
             The smoothed NIR is used to calculate the regression with other bands, 
             and the smoothed NIR is used to correct other bands
+        :param glint_mask (bool): whether to calculate a glint_mask using red to blue ratio
         """
         self.im_aligned = im_aligned
         if mode not in ['regression, least_sq, covariance,pearson']:
@@ -44,6 +45,7 @@ class Hedley:
         else:
             self.mode = mode
         self.smoothing = smoothing
+        self.glint_mask = glint_mask
         self.bbox = mutils.sort_bbox(bbox)
         ((x1,y1),(x2,y2)) = self.bbox
         self.glint_area = self.im_aligned[y1:y2,x1:x2,:]
@@ -175,6 +177,16 @@ class Hedley:
 
         return #regression_slopes
     
+    def get_glint_mask(self,NIR_threshold=0.8):
+        """
+        use R/B band ratio to determine glint mask
+        NIR_threshold is for red:blue band ratio
+        returns a np.ndarray (1 channel)
+        """
+        r_b_im = self.im_aligned[:,:,2]/self.im_aligned[:,:,0]
+        mask = np.where(r_b_im>NIR_threshold,1,0) #where glint pixel is 1, and non-glint pixel is 0
+        return mask
+    
     def correction_bands(self):
         """ 
         returns a list of slope in band order i.e. 0,1,2,3,4,5,6,7,8,9
@@ -210,6 +222,8 @@ class Hedley:
 
         b_list = self.correction_bands()
 
+        if self.glint_mask is True:
+            gm = self.get_glint_mask()
         hedley_c = lambda x,RT_NIR,b,R_min: x - b*(RT_NIR - R_min)
         # hedley_c = lambda x,RT_NIR,b,R_min: x - b*(RT_NIR - R_min) if (RT_NIR*b > x) else x
 
@@ -224,17 +238,26 @@ class Hedley:
                 # apply only the blured NIR band only to correct the glint extent for all bands (since here is a spatial discrepancy in glint distribution)
                 # but we use the original glint extent for all the bands
                 corrected_band = hedley_c(self.im_aligned[:,:,band_number],self.im_aligned_smoothed[:,:,self.NIR_band],b,self.R_min)
-                corrected_bands.append(corrected_band)
+                
                 # avg_reflectance.append(np.mean(self.glint_area[:,:,band_number]))
                 # avg_reflectance_corrected.append(np.mean(corrected_band[y1:y2,x1:x2]))
                 axes[band_number,0].imshow(self.im_aligned[:,:,band_number],vmin=0,vmax=1)
             else:
                 corrected_band = hedley_c(self.im_aligned[:,:,band_number],self.im_aligned[:,:,self.NIR_band],b,self.R_min)
-                corrected_bands.append(corrected_band)
+                
                 # avg_reflectance.append(np.mean(self.glint_area[:,:,band_number]))
                 # avg_reflectance_corrected.append(np.mean(corrected_band[y1:y2,x1:x2]))
                 axes[band_number,0].imshow(self.im_aligned[:,:,band_number],vmin=0,vmax=1)
-            axes[band_number,1].imshow(corrected_band,vmin=0,vmax=1)
+            
+            if self.glint_mask is True:
+                cb = self.im_aligned[:,:,band_number].copy()
+                cb[gm>0] = corrected_band[gm>0]
+            else:
+                cb = corrected_band
+
+            corrected_bands.append(cb)
+
+            axes[band_number,1].imshow(cb,vmin=0,vmax=1)
             axes[band_number,0].set_title(f'Band {self.wavelength_dict[band_number]} reflectance')
             axes[band_number,1].set_title(f'Band {self.wavelength_dict[band_number]} reflectance corrected')
 
@@ -334,4 +357,42 @@ class Hedley:
         plt.tight_layout()
         plt.show()
 
+        return
+    
+    def compare_image(self,save_dir=None, filename = None, plot = True):
+        """
+        :param save_dir (str): specify directory to store image in. If it is None, no image is saved
+        :param filename (str): filename of image u want to save e.g. 'D:\\EPMC_flight\\10thSur24Aug\\F2\\RawImg\\IMG_0192_1.tif'
+        returns a figure where left figure is original image, and right figure is corrected image
+        """
+        corrected_bands = self.get_corrected_bands(plot=False)
+        corrected_bands = np.stack(corrected_bands,axis=2)
+        corrected_im = np.take(corrected_bands,[2,1,0],axis=2)
+        original_im = np.take(self.im_aligned,[2,1,0],axis=2)
+        fig, axes = plt.subplots(1,2,figsize=(12,7))
+        axes[0].imshow(original_im)
+        axes[0].set_title('Original Image'+ r'($\sigma^2_T$' + f': {np.var(self.im_aligned):.4f})')
+        # ax.set_title(f'Iter {i} ' + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
+        axes[1].imshow(corrected_im)
+        axes[1].set_title('Corrected Image'+ r'($\sigma^2_T$' + f': {np.var(corrected_bands):.4f})')
+        for ax in axes:
+            ax.axis('off')
+        plt.tight_layout()
+
+        if save_dir is not None:
+            save_dir = os.path.join(save_dir,"corrected_images")
+            if not os.path.exists(save_dir):
+                os.mkdir(save_dir)
+
+            filename = mutils.get_all_dir(filename,iter=4)
+            filename = os.path.splitext(filename)[0]
+            full_fn = os.path.join(save_dir,filename)
+
+            fig.suptitle(filename)
+            fig.savefig('{}.png'.format(full_fn))
+
+        if plot is True:
+            plt.show()
+        else:
+            plt.close()
         return
