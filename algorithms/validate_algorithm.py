@@ -508,3 +508,32 @@ class EvaluateCorrection:
         plt.tight_layout()
         plt.show()
         return 
+    
+def compare_correction_algo(im_aligned,bbox,iter=3):
+    """
+    :param im_aligned (np.ndarray): reflectance image
+    :param bbox (tuple): bbox over glint area for Hedley algorithm
+    :param iter (int): number of iterations for SUGAR algorithm
+    compare SUGAR and Hedley algorithm
+    """
+    HH = Hedley.Hedley(im_aligned,bbox,smoothing=False,glint_mask=False)
+    corrected_Hedley = HH.get_corrected_bands(plot=False)
+    corrected_Hedley = np.stack(corrected_Hedley,axis=2)
+
+    corrected_bands = sugar.correction_iterative(im_aligned,iter=iter,plot=False)
+    corrected_SUGAR = corrected_bands[-1]
+
+    rgb_bands = [2,1,0]
+    fig, axes = plt.subplots(1,3,figsize=(12,5))
+    im_list = [im_aligned,corrected_Hedley,corrected_SUGAR]
+    title_list = ['Original',f'Hedley (iters: {iter})','SUGAR']
+    for im, title, ax in zip(im_list,title_list,axes.flatten()):
+        ax.imshow(np.take(im,rgb_bands,axis=2))
+        ax.set_title(title + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
+        ax.axis('off')
+
+    coord, w, h = mutils.bboxes_to_patches(bbox)
+    rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
+    axes[0,1].add_patch(rect)
+    plt.show()
+    return
