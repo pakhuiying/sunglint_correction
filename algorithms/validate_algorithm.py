@@ -526,7 +526,7 @@ def compare_correction_algo(im_aligned,bbox,iter=3):
     rgb_bands = [2,1,0]
     fig, axes = plt.subplots(1,3,figsize=(12,5))
     im_list = [im_aligned,corrected_Hedley,corrected_SUGAR]
-    title_list = ['Original',f'Hedley (iters: {iter})','SUGAR']
+    title_list = ['Original','Hedley',f'SUGAR (iters: {iter})']
     for im, title, ax in zip(im_list,title_list,axes.flatten()):
         ax.imshow(np.take(im,rgb_bands,axis=2))
         ax.set_title(title + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
@@ -534,6 +534,6 @@ def compare_correction_algo(im_aligned,bbox,iter=3):
 
     coord, w, h = mutils.bboxes_to_patches(bbox)
     rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
-    axes[0,1].add_patch(rect)
+    axes[1].add_patch(rect)
     plt.show()
     return
