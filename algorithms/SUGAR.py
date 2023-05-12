@@ -384,11 +384,16 @@ def correction_iterative(im_aligned,iter=3,bounds = [(1,2)]*10,estimate_backgrou
 
     if plot is True:
         nrows = ceil(len(corrected_images)/2)
-        fig, axes = plt.subplots(nrows,2,figsize=(10,5*nrows))
+        fig, axes = plt.subplots(nrows,2,figsize=(10,4*nrows))
         for i,(im, ax) in enumerate(zip(corrected_images,axes.flatten())):
-            ax.set_title(f'Iter {i}' + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
+            ax.set_title(f'Iter {i} ' + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
             ax.imshow(np.take(im,[2,1,0],axis=2))
             ax.axis('off')
+        
+        n_axis = nrows*2
+        n_del = int(n_axis - len(corrected_images))
+        for ax in axes.flatten()[-n_del:]:
+            ax.set_axis_off()
         plt.show()
         # b_list = HM.b_list
         # bounds = [(1,b*1.2) for b in b_list]
