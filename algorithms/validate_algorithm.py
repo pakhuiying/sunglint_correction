@@ -15,6 +15,8 @@ import mutils
 import extract_spectral as espect
 import algorithms.Hedley as Hedley
 import algorithms.SUGAR as sugar
+from algorithms.GLORIA import GloriaSimulate
+from skimage.transform import resize
 from scipy.ndimage import gaussian_filter,laplace, gaussian_laplace
 from scipy.optimize import minimize_scalar
 
@@ -225,32 +227,62 @@ class SimulateGlint:
     
 class SimulateBackground:
     """
-    :param background_fp (str): filepath to a pickle file of water spectra
-    :param turbid_fp (str): filepath to a pickle file of turbid spectra
     :param glint_fp (str): filepath to a pickle file of extracted glint
-    :param bboxes_list (list of tuple): where each tuple is ((x1,y1),(x2,y2)) to superimpose turbid spectra over water spectra
+    # image fine-tuning
+    :param fp_rrs (str): folder path to GLORIA Rrs dataset (multiply by pi to get surface reflectance)
+    :param fp_meta (str): folder path to metadata
+    :param water_type (list of int): where...
+        1: sediment-dominated
+        2: chl-dominated
+        3: CDOM-dominated
+        4: Chl+CDOM-dominated
+        5: Moderate turbid coastal (e.g., 0.3<TSS<1.2 & 0.5 <Chl<2.0)
+        6: Clear (e.g., TSS<0.3 & 0.1<Chl<0.7)
+    :param sigma (int): sigma for gaussian filtering to blend background spectra
+    :param n_rrs (int): number of distinct Rrs observation
+    :param scale (float): scale Rrs by a factor
+    :param set_seed (bool): to ensure replicability if needed
+    # image distortion
+    :param rotation (float): Additional rotation applied to the image.
+    :param strength (float): The amount of swirling applied.
+    :param radius (float): The extent of the swirl in pixels. The effect dies out rapidly beyond radius.
+    # SUGAR parameters
+    :param estimate_background (bool): parameter in SUGAR, whether to estimate the underlying background
+    :param iter (int): number of iterations to run SUGAR algorithm
+    # plotting parameters
     :param y_line (float): get spectra on a horizontal cross-section
-    :param sigma (int): sigma for gaussian filtering to blend turbid into background spectra
     :param x_range (tuple or list): set x_limit for displaying spectra
     :TODO randomly generate integers within the shape of im_aligned to randomly generate tuples
     """
-    def __init__(self,background_fp,
-                 turbid_fp,
+    def __init__(self,
                  glint_fp,
-                 bboxes_list,
-                 estimate_background=True,
-                 iter=3,
-                 y_line=None,sigma=20,x_range=None):
+                 fp_rrs, fp_meta, water_type, sigma=10, n_rrs=5, scale=5, set_seed=False,# image fine-tuning
+                 rotation=90,strength=10,radius=120,# image distortion
+                 estimate_background=True, iter=3, # parameters in SUGAR
+                 y_line=None,x_range=None):
         
-        self.background_fp = background_fp
-        self.turbid_fp = turbid_fp
         self.glint_fp = glint_fp
-        self.bboxes_list = bboxes_list
+        self.fp_rrs = fp_rrs
+        self.fp_meta = fp_meta
+        self.water_type = water_type
+        self.sigma = sigma
+        # image fine-tuning
+        self.n_rrs = n_rrs
+        self.scale = scale
+        self.set_seed = set_seed
+        # image distortion
+        self.rotation = rotation
+        self.strength = strength
+        self.radius = radius
+        # SUGAR parameters
         self.estimate_background = estimate_background
         self.iter = iter
+        # plotting parameters
         self.y_line = y_line
-        self.sigma = sigma
         self.x_range = x_range
+        # wavelengths
+        wavelengths = mutils.sort_bands_by_wavelength()
+        self.wavelength_dict = {i[0]:i[1] for i in wavelengths}
     
     def correction_iterative(self,glint_image,bounds = [(1,2)]*10,plot=False):
         for i in range(self.iter):
@@ -263,31 +295,56 @@ class SimulateBackground:
                 plt.imshow(np.take(glint_image,[2,1,0],axis=2))
                 plt.axis('off')
                 plt.show()
-            b_list = HM.b_list
-            bounds = [(1,b*1.2) for b in b_list]
+            # b_list = HM.b_list
+            # bounds = [(1,b*1.2) for b in b_list]
         
         return glint_image
 
-    def simulate_background(self):
+    def simulate_background(self, plot = False):
         """
-        :param iter (int): number of iterations to run the correction
         returns simulated_background, simulated_glint
         """
-        water_spectra = mutils.load_pickle(self.background_fp)
-        turbid_spectra = mutils.load_pickle(self.turbid_fp)
+        glint = mutils.load_pickle(self.glint_fp)
+
+        nrow,ncol,n_bands = glint.shape
+
+        G = GloriaSimulate(self.fp_rrs,self.fp_meta,self.water_type,self.sigma)
+
+        if self.set_seed:
+            np.random.seed(1)
+
+        n_rrs = np.random.randint(self.n_rrs)
+        scale = np.random.randint(self.scale)
+        rotation = np.random.randint(self.rotation)
+        strength = np.random.randint(self.strength)
+        radius = np.random.randint(self.radius)
+        print(f"n_rrs:{n_rrs}, scale:{scale}, rotation: {rotation}, strength: {strength}, radius: {radius}")
+        
+        im = G.get_image(n_rrs=n_rrs,scale=scale,plot=False,set_seed=self.set_seed)
+        im = G.image_distortion(im,rotation=rotation,strength=strength,radius=radius,plot=False)
+        water_spectra = resize(im,(nrow,ncol,n_bands),anti_aliasing=True) # water spectra in wavelength order
+
+        #change to band order
+        band_idx = {b:i for i,b in enumerate(self.wavelength_dict.keys())}
+        band_idx = [band_idx[i] for i in range(len(band_idx.values()))]
+        water_spectra = np.take(water_spectra,band_idx,axis=2)
+
+        if plot is True:
+            plt.figure()
+            plt.imshow(np.take(water_spectra,[2,1,0],axis=2))
+            plt.axis('off')
+            plt.show()
+        return water_spectra
+    
+    def simulate_glint(self,water_spectra):
+        """
+        add glint on top of background spectra
+        """
         glint = mutils.load_pickle(self.glint_fp)
 
         nrow,ncol = glint.shape[0],glint.shape[1]
 
-        water_spectra = np.tile(water_spectra,(nrow,ncol,1))
-        
-        for bbox in self.bboxes_list:
-            ((x1,y1),(x2,y2)) = bbox
-            water_spectra[y1:y2,x1:x2,:] = turbid_spectra
-        
-        for i in range(water_spectra.shape[-1]):
-            water_spectra[:,:,i] = gaussian_filter(water_spectra[:,:,i],sigma=self.sigma)
-        
+        assert (nrow == water_spectra.shape[0]) and (ncol == water_spectra.shape[1])
         # add simulated glint, add the signal from glint + background water spectra
         simulated_glint = water_spectra.copy()
         
@@ -302,6 +359,7 @@ class SimulateBackground:
         returns simulated_background, simulated_glint, and corrected_img
         """
         simulated_im = self.simulate_background()
+        simulated_im = self.simulate_glint(simulated_im)
         water_spectra = simulated_im['Simulated background']
         simulated_glint = simulated_im['Simulated glint']
 

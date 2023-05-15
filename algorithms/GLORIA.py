@@ -17,7 +17,7 @@ class GloriaSimulate:
     def __init__(self,fp_rrs,fp_meta,water_type,sigma=20):
         """
         :param fp_rrs (str): folder path to GLORIA Rrs dataset (multiply by pi to get surface reflectance)
-        ;param fp_meta (str): folder path to metadata
+        :param fp_meta (str): folder path to metadata
         :param water_type (list of int): where...
             1: sediment-dominated
             2: chl-dominated
@@ -123,7 +123,7 @@ class GloriaSimulate:
         :param nrow (int): y dimension of image
         :param ncol (int): x dimension of image
         :param scale (float): scale Rrs by a factor
-        :param set_seed (bool): to ensure if seed
+        :param set_seed (bool): to ensure replicability if needed
         """
         rgb_idx = self.get_rgb_idx()
 
@@ -167,6 +167,9 @@ class GloriaSimulate:
 
     def image_distortion(self,im,rotation=0,strength=10,radius=120,plot=True):
         """
+        :param rotation (float): Additional rotation applied to the image.
+        :param strength (float): The amount of swirling applied.
+        :param radius (float): The extent of the swirl in pixels. The effect dies out rapidly beyond radius.
         to simulate non-homogenous background spectra
         https://stackoverflow.com/questions/225548/resources-for-image-distortion-algorithms
         https://scikit-image.org/docs/stable/auto_examples/transform/plot_swirl.html
@@ -195,11 +198,12 @@ if __name__ == "__main__":
     fp_meta = r"C:\Users\PAKHUIYING\OneDrive - Nanyang Technological University\NTU\Datasets\GLORIA-2022\GLORIA_2022\GLORIA_meta_and_lab.csv"
     water_type = [1,5]
     G = GloriaSimulate(fp_rrs,fp_meta,water_type,sigma=10)
-    im = G.get_image(n_rrs=4,nrow=64,ncol=64,scale=1,plot=False,set_seed=False)
+    im = G.get_image(n_rrs=4,scale=1,plot=False,set_seed=False)
     im = G.image_distortion(im,rotation=0,strength=10,radius=120,plot=False)
     im = resize(im,(919,1226,10),anti_aliasing=True)
     
     rgb_idx = G.get_rgb_idx()
+    # print(rgb_idx)
     plt.figure()
     plt.imshow(np.take(im,rgb_idx,axis=2))
     plt.axis('off')
