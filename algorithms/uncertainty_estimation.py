@@ -16,41 +16,42 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
 from scipy import ndimage
 from scipy import stats
+from skimage.transform import resize
 import algorithms.SUGAR as sugar
 
 class UncertaintyEst:
-    def __init__(self,corrected_im_background, corrected_im):
+    def __init__(self,im_aligned,corrected_im_background, corrected_im,glint_mask=None):
         """
-        :param corrected_im_background (np.ndarray): image accounted for 
+        :param im_aligned (np.ndarray): band aligned and calibrated & corrected reflectance image
+        :param corrected_im_background (np.ndarray): image accounted for background spectra
         :param corrected_im (np.ndarray)
-
+        :param glint_mask (np.ndarray): where 1 is glint pixel and 0 is non-glint
         """
+        self.im_aligned = im_aligned
         self.corrected_im_background = corrected_im_background
         self.corrected_im = corrected_im
+        self.glint_mask = glint_mask
 
     @classmethod
-    def get_corrected_image(glint_image,iter=3,bounds = [(1,2)]*10):
-
+    def get_corrected_image(cls,glint_image,iter=3,bounds = [(1,2)]*10):
+        
+        im_aligned = glint_image.copy()
+        
         def correction_iterative(glint_image,iter,bounds,estimate_background):
-            gm_list = []
-            bg_list = []
+            
             for i in range(iter):
                 HM = sugar.SUGAR(glint_image,iter,bounds,estimate_background)
                 corrected_bands = HM.get_corrected_bands()
                 glint_image = np.stack(corrected_bands,axis=2)
+                if i == 0:
+                    glint_mask = np.stack(HM.glint_mask,axis=2)
                 
-                b_list = HM.b_list
-                bounds = [(1,b*1.2) for b in b_list]
-                glint_mask = HM.glint_mask
-                est_background = HM.est_background
-
-                gm_list.append(glint_mask)
-                bg_list.append(est_background)
-            return glint_image, gm_list, bg_list
+            return glint_image, glint_mask
         
-        corrected_im_background, gm_list_background, bg_list_background = correction_iterative(glint_image,iter=iter,bounds = bounds,estimate_background=True)
-        corrected_im, gm_list, bg_list = correction_iterative(glint_image,iter=iter,bounds = bounds,estimate_background=False)
+        corrected_im_background, glint_mask = correction_iterative(glint_image,iter=iter,bounds = bounds,estimate_background=True)
+        corrected_im, _ = correction_iterative(glint_image,iter=iter,bounds = bounds,estimate_background=False)
         
+        return cls(im_aligned,glint_image,corrected_im_background,corrected_im,glint_mask)
 
 def plot_glint_contour(im_aligned,glint_mask,NIR_band=3,add_weights=False):
     """ 
@@ -76,7 +77,7 @@ def plot_glint_contour(im_aligned,glint_mask,NIR_band=3,add_weights=False):
 
     if add_weights is True:
         im = im_aligned[:,:,NIR_band]
-        weights = im[(idx[:,0], idx[:,1])]#.reshape(-1,1)
+        weights = im[(idx[:,1], idx[:,0])]#.reshape(-1,1)
         # weights = np.flipud(weights)
         weights[weights<0] = 0
 
@@ -86,16 +87,20 @@ def plot_glint_contour(im_aligned,glint_mask,NIR_band=3,add_weights=False):
         kernel = stats.gaussian_kde(Xtrain)
 
     Z = kernel(xy).T
-    print(Z.shape)
+    # print(Z.shape)
     Z = np.reshape(Z, X.shape)
-    Z = np.flipud(Z)
     # plot contours of the density
     levels = np.linspace(0, Z.max(), 25)
 
     fig, axes = plt.subplots(1,2,figsize=(10,5),sharex=True)
     axes[0].imshow(np.take(im_aligned,[2,1,0],axis=2))
-    im = axes[1].contourf(X, Y, Z, levels=levels, cmap=plt.cm.RdGy_r)
+    axes[0].set_title('Original RGB image')
+    im = axes[1].contourf(X, Y, np.flipud(Z), levels=levels, cmap=plt.cm.RdGy_r)
     axes[1].set_aspect('equal')
+    axes[1].set_title('Glint mask KDE')
     fig.colorbar(im,ax=axes[1])
+    for ax in axes:
+        ax.axis('off')
     plt.show()
-    return 
+    return resize(Z,(nrow,ncol),anti_aliasing=True)
+
