@@ -353,7 +353,7 @@ class SimulateBackground:
         return {'Simulated background':water_spectra,
                 'Simulated glint': simulated_glint}
     
-    def simulation(self):
+    def simulation(self,iter=3,bounds= [(1,2)]*10):
         """
         :param iter (int): number of iterations to run the correction
         returns simulated_background, simulated_glint, and corrected_img
@@ -364,16 +364,17 @@ class SimulateBackground:
         simulated_glint = simulated_im['Simulated glint']
 
         nrow,ncol = simulated_glint.shape[0],simulated_glint.shape[1]
+        corrected_bands = sugar.correction_iterative(simulated_glint, iter=iter, bounds = bounds,estimate_background=self.estimate_background,get_glint_mask=False)
         # apply SUGAR on simulated glint
         # get corrected_bands
-        corrected_bands = self.correction_iterative(simulated_glint)
+        # corrected_bands = self.correction_iterative(simulated_glint)
         # HM = HedleyMulti.HedleyMulti(simulated_glint,None, sigma=1)
         # corrected_bands = HM.get_corrected_bands(plot=False)
         # corrected_bands = np.stack(corrected_bands,axis=2)
 
         im_list = {'Simulated background':water_spectra,
                 'Simulated glint': simulated_glint,
-                'Corrected for glint': corrected_bands}
+                'Corrected for glint': corrected_bands[-1]}
         
         rgb_bands = [2,1,0]
 

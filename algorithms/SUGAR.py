@@ -367,22 +367,28 @@ class SUGAR:
             plt.close()
         return
 
-def correction_iterative(im_aligned,iter=3,bounds = [(1,2)]*10,estimate_background=True,plot=False):
+def correction_iterative(im_aligned,iter=3,bounds = [(1,2)]*10,estimate_background=True,get_glint_mask=False,plot=False):
     """
-    :param im_aligned (np.ndarray)
+    :param im_aligned (np.ndarray): band aligned and calibrated & corrected reflectance image
     :param iter (int): number of iterations to run the sugar algorithm
-    :bounds (list of tuples): to limit 
+    :param bounds (list of tuples): to limit correction magnitude
+    :param get_glint_mask (np.ndarray): 
     conducts iterative correction using SUGAR
     """
     glint_image = im_aligned.copy()
-    corrected_images = [glint_image]
+    corrected_images = []
     for i in range(iter):
         HM = SUGAR(glint_image,bounds,estimate_background=estimate_background)
         corrected_bands = HM.get_corrected_bands()
         glint_image = np.stack(corrected_bands,axis=2)
+        # save corrected bands for each iteration
         corrected_images.append(glint_image)
+        # save glint_mask
+        if i == 0 and get_glint_mask is True:
+            glint_mask = np.stack(HM.glint_mask,axis=2)
 
     if plot is True:
+        corrected_images = [im_aligned] + corrected_images
         nrows = ceil(len(corrected_images)/2)
         fig, axes = plt.subplots(nrows,2,figsize=(10,4*nrows))
         for i,(im, ax) in enumerate(zip(corrected_images,axes.flatten())):
@@ -398,4 +404,4 @@ def correction_iterative(im_aligned,iter=3,bounds = [(1,2)]*10,estimate_backgrou
         # b_list = HM.b_list
         # bounds = [(1,b*1.2) for b in b_list]
     
-    return corrected_images
+    return corrected_images if get_glint_mask is False else (corrected_images,glint_mask)
