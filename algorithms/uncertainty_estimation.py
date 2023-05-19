@@ -106,7 +106,7 @@ class UncertaintyEst:
     def get_uncertainty_bounds(self,get_upper_and_lower_bounds = False, plot = True):
         """
         returns lower, upper bound and total variance of all iterations in band order i.e. 0,1,2,3,4,5,6,7,8,9
-        returns np.ndarray 
+        returns np.ndarray of total uncertainty in terms of variance across all iterations
         """
         upper_bound_uncertainty = []
         lower_bound_uncertainty = []
@@ -125,13 +125,28 @@ class UncertaintyEst:
         total_uncertainty = np.stack(total_uncertainty,axis=2)
 
         if plot is True:
-            fig, axes = plt.subplots(len(total_uncertainty),1,figsize=(5,20))
-            for i,(band_number,wavelength) in zip(range(len(total_uncertainty)),self.wavelength_dict.items()):
-                # im = axes[i].imshow(normalise(total_uncertainty[i]))
-                im = axes[i].contourf(total_uncertainty[:,:,band_number],levels=7,origin='upper')
-                axes[i].axis('off')
-                axes[i].set_title(f'Total uncertainty ({wavelength} nm)')
-                fig.colorbar(im,ax=axes[i])
+            n_bands = total_uncertainty.shape[-1]
+            spectral = plt.get_cmap('Spectral_r') 
+            cNorm  = colors.Normalize(vmin=0, vmax=n_bands-1)
+            scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=spectral)
+            values = range(n_bands)
+            nrow, ncol = total_uncertainty.shape[0], total_uncertainty.shape[1]
+            n = nrow*ncol
+            fig, axes = plt.subplots(n_bands,2,figsize=(9,20))
+            for i,(band_number,wavelength) in enumerate(self.wavelength_dict.items()):
+                colorVal = scalarMap.to_rgba(values[i],alpha=0.3)
+                # column 0 shows the spatial distribution of uncertainty
+                var_total = total_uncertainty[:,:,band_number]
+                im = axes[i,0].contourf(var_total,levels=7,origin='upper')
+                axes[i,0].axis('off')
+                axes[i,0].set_aspect('equal')
+                axes[i,0].set_title(r'$\sigma_{max}^2 = $' + f'{var_total.max():.4f} ({wavelength} nm)')
+                # column 1 shows the at which reflectances uncertainty is the highest
+                axes[i,1].scatter(self.im_aligned[:,:,band_number].flatten(),var_total.flatten(),s=3,color=colorVal,marker='o')
+                axes[i,1].set_xlabel(r'$R_T$')
+                axes[i,1].set_ylabel(r'$\sigma^2$')
+                axes[i,1].set_title(f'{wavelength} nm (N = {n})')
+                fig.colorbar(im,ax=axes[i,0])
+            plt.tight_layout()
             plt.show()
         return total_uncertainty if get_upper_and_lower_bounds is False else (lower_bound_uncertainty, upper_bound_uncertainty, total_uncertainty)
-
