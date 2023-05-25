@@ -281,10 +281,11 @@ class SimulateBackground:
         self.y_line = y_line
         self.x_range = x_range
         # wavelengths
+        self.rgb_bands = [2,1,0]
         wavelengths = mutils.sort_bands_by_wavelength()
         self.wavelength_dict = {i[0]:i[1] for i in wavelengths}
     
-    def correction_iterative(self,glint_image,bounds = [(1,2)]*10,plot=False):
+    def correction_iterative(self,glint_image,bounds = [(1,2)],plot=False):
         for i in range(self.iter):
             HM = sugar.SUGAR(glint_image,bounds,estimate_background=self.estimate_background)
             corrected_bands = HM.get_corrected_bands()
@@ -353,7 +354,7 @@ class SimulateBackground:
         return {'Simulated background':water_spectra,
                 'Simulated glint': simulated_glint}
     
-    def simulation(self,iter=3,bounds= [(1,2)]*10):
+    def simulation(self,iter=3,bounds= [(1,2)]):
         """
         :param iter (int): number of iterations to run the correction
         returns simulated_background, simulated_glint, and corrected_img
@@ -364,41 +365,60 @@ class SimulateBackground:
         simulated_glint = simulated_im['Simulated glint']
 
         nrow,ncol = simulated_glint.shape[0],simulated_glint.shape[1]
-        corrected_bands = sugar.correction_iterative(simulated_glint, iter=iter, bounds = bounds,estimate_background=self.estimate_background,get_glint_mask=False)
-        # apply SUGAR on simulated glint
-        # get corrected_bands
-        # corrected_bands = self.correction_iterative(simulated_glint)
-        # HM = HedleyMulti.HedleyMulti(simulated_glint,None, sigma=1)
-        # corrected_bands = HM.get_corrected_bands(plot=False)
-        # corrected_bands = np.stack(corrected_bands,axis=2)
+        corrected_bands = sugar.correction_iterative(simulated_glint, iter=iter, bounds = bounds,estimate_background=False,get_glint_mask=False)
+        corrected_bands_background = sugar.correction_iterative(simulated_glint, iter=iter, bounds = bounds,estimate_background=True,get_glint_mask=False)
 
-        im_list = {'Simulated background':water_spectra,
-                'Simulated glint': simulated_glint,
-                'Corrected for glint': corrected_bands[-1]}
-        
-        rgb_bands = [2,1,0]
+        im_list = {'R_BG':water_spectra,
+                'R_T': simulated_glint,
+                'R_prime_T': corrected_bands[-1],
+                'R_prime_T_BG':corrected_bands_background[-1]}
 
-        fig, axes = plt.subplots(3,2,figsize=(11,13))
+        fig, axes = plt.subplots(3,4,figsize=(12,8))
 
-        for i,(title, im) in enumerate(im_list.items()):
-            im_cropped = np.take(im,rgb_bands,axis=2)
-            axes[i,0].imshow(im_cropped)
-            axes[i,0].plot([0,ncol-1],[self.y_line]*2,c='r',ls='--',alpha=0.5)
-            for j,c in zip(rgb_bands,['r','g','b']):
+        titles = [r'$R_{BG}$',r'$R_T$',r'$R_T\prime$',r'$R_{T,BG}\prime$']
+        x = list(self.wavelength_dict.values())
+        # water spectra
+        og_avg_reflectance = [np.mean(water_spectra[:,:,band_number]) for band_number in range(simulated_glint.shape[-1])]
+        og_y = [og_avg_reflectance[i] for i in list(self.wavelength_dict)]
+        # simulated_glint
+        sim_avg_reflectance = [np.mean(simulated_glint[:,:,band_number]) for band_number in range(simulated_glint.shape[-1])]
+        sim_y = [sim_avg_reflectance[i] for i in list(self.wavelength_dict)]
+
+        for i,(title, im) in enumerate(zip(titles,im_list.values())):
+            rgb_im = np.take(im,self.rgb_bands,axis=2)
+            axes[0,i].imshow(rgb_im)
+            axes[0,i].plot([0,ncol-1],[self.y_line]*2,c='r',linewidth=3,alpha=0.5)
+            axes[0,i].set_title(title + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
+            # plot original reflectance
+            axes[1,i].plot(x,og_y,label=r'$R_{BG}(\lambda)$')
+            # plot simulated glint reflectance
+            axes[1,i].plot(x,sim_y,label=r'$R_T(\lambda)$')
+            # plot corrected reflectance
+            if i > 1:
+                avg_reflectance = [np.mean(im[:,:,band_number]) for band_number in range(im.shape[-1])]
+                y = [avg_reflectance[i] for i in list(self.wavelength_dict)]
+                axes[1,i].plot(x,y,label=r'$R_T(\lambda)\prime$')
+
+            for j,c in zip(self.rgb_bands,['r','g','b']):
                 # plot reflectance for each band along red line
-                axes[i,1].plot(list(range(ncol)),im[self.y_line,:,j],c=c,alpha=0.5)
-            for ax in axes[i,:]:
-                ax.set_title(title)
-
-        # for ax in axes[:,0]:
-        #     ax.axis('off')
-        for ax in axes[:,1]:
-            ax.set_xlabel("Pixels along red line")
-            ax.set_ylabel("Reflectance")
-            ax.set_ylim(0,1)
-            if self.x_range is not None:
-                ax.set_xlim(self.x_range[0],self.x_range[1])
+                axes[2,i].plot(list(range(ncol)),im[self.y_line,:,j],c=c,alpha=0.5,label=c)
                 
+
+        y1,y2 = axes[1,1].get_ylim()
+        for i,ax in enumerate(axes[1,:]):
+            ax.set_title(titles[i] + " (Mean Reflectance)")
+            ax.set_xlabel("Wavelength (nm)")
+            ax.set_ylabel("Reflectance")
+            ax.set_ylim(y1,y2)
+            ax.legend(loc='upper right')
+
+        y1,y2 = axes[2,1].get_ylim()
+        for i,ax in enumerate(axes[2,:]):
+            ax.set_title(titles[i]+" (Pixels along red line)")
+            ax.set_xlabel("Image position")
+            ax.set_ylabel("Reflectance")
+            ax.set_ylim(y1,y2)
+            ax.legend(loc='upper right')
 
         plt.tight_layout()
         plt.show()
@@ -439,13 +459,14 @@ class EvaluateCorrection:
             ax.axis('off')
             rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
             ax.add_patch(rect)
-        
-        for im,label in zip([self.glint_im,self.corrected_glint],[r'$R_T$',r'$R_T\prime$']):
-            avg_reflectance = [np.mean(im[y1:y2,x1:x2,band_number]) for band_number in range(self.glint_im.shape[-1])]
-            axes[0,2].plot(list(self.wavelength_dict.values()),[avg_reflectance[i] for i in list(self.wavelength_dict)],label=label)
+
         if self.no_glint is not None:
             avg_reflectance = [np.mean(self.no_glint[y1:y2,x1:x2,band_number]) for band_number in range(self.glint_im.shape[-1])]
             axes[0,2].plot(list(self.wavelength_dict.values()),[avg_reflectance[i] for i in list(self.wavelength_dict)],label=r'$R_{BG}$')
+
+        for im,label in zip([self.glint_im,self.corrected_glint],[r'$R_T$',r'$R_T\prime$']):
+            avg_reflectance = [np.mean(im[y1:y2,x1:x2,band_number]) for band_number in range(self.glint_im.shape[-1])]
+            axes[0,2].plot(list(self.wavelength_dict.values()),[avg_reflectance[i] for i in list(self.wavelength_dict)],label=label)
 
         axes[0,2].set_xlabel('Wavelengths (nm)')
         axes[0,2].set_ylabel('Reflectance')
@@ -466,11 +487,11 @@ class EvaluateCorrection:
             rgb_cropped = np.take(im[y1:y2,x1:x2,:],rgb_bands,axis=2)
             ax.imshow(rgb_cropped)
             ax.set_title(title)
-            ax.axis('off')
-            ax.plot([0,w],[h//2,h//2],color="red",linewidth=3,alpha=0.5)
+            # ax.axis('off')
+            ax.plot([0,w-1],[h//2,h//2],color="red",linewidth=3,alpha=0.5)
             for j,c in enumerate(['r','g','b']):
                 axes[1,i+2].plot(list(range(w)),rgb_cropped[h//2,:,j],c=c,alpha=0.5,label=c)
-            axes[1,i+2].set_xlabel('Width of image')
+            axes[1,i+2].set_xlabel('Image position')
             axes[1,i+2].set_ylabel('Reflectance')
             axes[1,i+2].legend(loc="upper right")
             axes[1,i+2].set_title(f'{title} along red line')
@@ -484,33 +505,32 @@ class EvaluateCorrection:
     
     def glint_vs_corrected(self):
         """ plot scatter plot of glint correction vs glint magnitude"""
-        n = self.glint_im.shape[-1]
         simulated_background = self.no_glint
         simulated_glint = self.glint_im
         
         if self.no_glint is None:
-            fig, axes = plt.subplots(n,1,figsize=(7,20))
+            fig, axes = plt.subplots(self.n_bands,1,figsize=(7,20))
         else:
-            fig, axes = plt.subplots(n,4,figsize=(15,25))
+            fig, axes = plt.subplots(self.n_bands,4,figsize=(15,25))
             
-        for i in range(n):
+        for i, (band_number, wavelength) in enumerate(self.wavelength_dict.items()):
             if self.glint_mask is not None:
-                gm = self.glint_mask[:,:,i]
+                gm = self.glint_mask[:,:,band_number]
             # check how much glint has been removed
-            correction_mag = simulated_glint[:,:,i] - self.corrected_glint[:,:,i]
+            correction_mag = simulated_glint[:,:,band_number] - self.corrected_glint[:,:,band_number]
             if self.glint_mask is None:
                 # glint + water background
-                extracted_glint = simulated_glint[:,:,i].flatten()
+                extracted_glint = simulated_glint[:,:,band_number].flatten()
                 extracted_correction = correction_mag.flatten()
             else:
-                extracted_glint = simulated_glint[:,:,i][gm!=0]
+                extracted_glint = simulated_glint[:,:,band_number][gm!=0]
                 extracted_correction = correction_mag[gm!=0]
 
             if self.no_glint is not None:
                 # actual glint contribution
-                glint_original_glint = simulated_glint[:,:,i] - simulated_background[:,:,i]
+                glint_original_glint = simulated_glint[:,:,band_number] - simulated_background[:,:,band_number]
                 # how much glint is under/overcorrected i.e. ground truth vs corrected
-                residual_glint = self.corrected_glint[:,:,i] - simulated_background[:,:,i]
+                residual_glint = self.corrected_glint[:,:,band_number] - simulated_background[:,:,band_number]
                 if self.glint_mask is None:
                     extracted_original_glint = glint_original_glint.flatten()
                     extracted_residual_glint = residual_glint.flatten()
@@ -523,55 +543,200 @@ class EvaluateCorrection:
                 fig.colorbar(im, ax=axes[i,0])
                 # check how much glint has been removed vs actual glint contribution
                 axes[i,1].scatter(extracted_glint,extracted_original_glint,c=extracted_residual_glint,alpha=0.3,s=1)
-                axes[i,1].set_xlabel('Glint magnitude')
-                axes[i,1].set_ylabel('Glint contribution')
+                axes[i,1].set_title(f'Glint contribution ({wavelength} nm)')
+                axes[i,1].set_xlabel(r'$R_T$')
+                axes[i,1].set_ylabel(r'$R_T - R_{BG}$')
 
-                axes[i,2].imshow(simulated_glint[:,:,i])
-                axes[i,2].set_title(f'Original image (Band {i})')
+                axes[i,2].imshow(simulated_glint[:,:,band_number])
+                axes[i,2].set_title(r'$R_T$' + f' ({wavelength} nm)')
+                axes[i,2].axis('off')
 
                 im = axes[i,3].imshow(residual_glint,interpolation='none')
                 fig.colorbar(im, ax=axes[i,3])
-                axes[i,3].set_title(f'Residual glint (Band {i})')
+                axes[i,3].set_title(r'$R_T\prime - R_{BG}$' + f' ({wavelength} nm)')
+                axes[i,3].axis('off')
 
-                axes[i,0].set_title(f'Band {i}')
-                axes[i,0].set_xlabel('Glint magnitude')
-                axes[i,0].set_ylabel('Glint Correction')
+                axes[i,0].set_title(f'Glint correction ({wavelength} nm)')
+                axes[i,0].set_xlabel(r'$R_T$')
+                axes[i,0].set_ylabel(r'$R_T - R_T\prime$')
             
             else:
                 axes[i].scatter(extracted_glint,extracted_correction,s=1)
-                axes[i].set_title(f'Band {i}')
+                axes[i].set_title(f'{wavelength} nm')
                 axes[i].set_xlabel('Glint magnitude')
-                axes[i].set_ylabel('Glint Correction')
+                axes[i].set_ylabel(r'$R_T - R_T\prime$')
             
         plt.tight_layout()
         plt.show()
         return 
+
+def compare_plots(im_list, title_list, bbox=None):
+    """
+    :param im_list (list of np.ndarray): where the first item is always the original image
+    :param title_list (list of str): the title for the first row
+    :param bbox (tuple): bbox over glint area for Hedley algorithm
+    """
+    rgb_bands = [2,1,0]
+    wavelengths = mutils.sort_bands_by_wavelength()
+    wavelength_dict = {i[0]:i[1] for i in wavelengths}
+    nrow, ncol, n_bands = im_list[0].shape
+
+    plot_width = len(im_list)*3
+    if bbox is not None:
+        ((x1,y1),(x2,y2)) = bbox
+        coord, w, h = mutils.bboxes_to_patches(bbox)
+        plot_height = 14
+        plot_row = 4
+    else:
+        plot_height = 11
+        plot_row = 3
+
+    fig, axes = plt.subplots(plot_row,len(im_list),figsize=(plot_width,plot_height))
+
+    og_avg_reflectance = [np.mean(im_list[0][y1:y2,x1:x2,band_number]) for band_number in range(n_bands)]
+    x = list(wavelength_dict.values())
+    og_y = [og_avg_reflectance[i] for i in list(wavelength_dict)]
+
+    for i,(im, title) in enumerate(zip(im_list,title_list)): #iterate acoss column
+        # plot image
+        rgb_im = np.take(im,rgb_bands,axis=2)
+        axes[0,i].imshow(rgb_im)
+        axes[0,i].set_title(title + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
+        axes[0,i].axis('off')
+        if bbox is not None:
+            rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
+            axes[0,i].add_patch(rect)
+        # plot original reflectance
+        axes[1,i].plot(x,og_y,label=r'$R_T(\lambda)$')
+        # plot corrected reflectance
+        if i > 0:
+            if bbox is not None:
+                avg_reflectance = [np.mean(im[y1:y2,x1:x2,band_number]) for band_number in range(n_bands)]
+            else:
+                avg_reflectance = [np.mean(im) for band_number in range(n_bands)]
+            y = [avg_reflectance[i] for i in list(wavelength_dict)]
+            axes[1,i].plot(x,y,label=r'$R_T(\lambda)\prime$')
+        axes[1,i].legend(loc="upper right")
+        axes[1,i].set_title(r'$R_T(\lambda)\prime$'+' in AOI')
+        axes[1,i].set_xlabel('Wavelengths (nm)')
+        axes[1,i].set_ylabel('Reflectance')
+
+        # plot cropped rgb
+        rgb_cropped = rgb_im[y1:y2,x1:x2,:] if bbox is not None else rgb_im
+        if bbox is not None:
+            axes[2,i].imshow(rgb_cropped)
+            axes[2,i].set_title('AOI')
+            axes[2,i].plot([0,w-1],[abs(h)//2,abs(h)//2],color="red",linewidth=3,alpha=0.5)
+        
+        row_idx = 3 if bbox is not None else 2
+        h = nrow if bbox is None else h
+        # plot reflectance along red line
+        for j,c in enumerate(['r','g','b']):
+            axes[row_idx,i].plot(list(range(w)),rgb_cropped[h//2,:,j],c=c,alpha=0.5,label=c)
+        axes[row_idx,i].set_xlabel('Image position')
+        axes[row_idx,i].set_ylabel('Reflectance')
+        axes[row_idx,i].legend(loc="upper right")
+        axes[row_idx,i].set_title(r'$R_T(\lambda)\prime$'+' along red line')
     
-def compare_correction_algo(im_aligned,bbox,iter=3):
+    y1,y2 = axes[row_idx,0].get_ylim()
+    for i in range(len(im_list)):
+        axes[row_idx,i].set_ylim(y1,y2)
+    
+    plt.tight_layout()
+    plt.show()
+    return
+
+
+def compare_sugar_algo(im_aligned,bbox=None,corrected = None, corrected_background = None, iter=3, bounds=[(1,2)]):
+    """
+    :param im_aligned (np.ndarray): reflectance image
+    :param bbox (tuple): bbox over glint area for Hedley algorithm
+    :param corrected (np.ndarray): corrected for glint without taking into account of background
+    :param corrected_background (np.ndarray): corrected for glint taking into account of background
+    :param iter (int): number of iterations for SUGAR algorithm
+    compare SUGAR algorithm, whether to take into account of background spectra
+    returns a tuple (corrected, corrected_background)
+    """
+    if corrected is None:
+        corrected = sugar.correction_iterative(im_aligned, iter=iter, bounds = bounds,estimate_background=False,get_glint_mask=False)
+    if corrected_background is None:
+        corrected_background = sugar.correction_iterative(im_aligned, iter=iter, bounds = bounds,estimate_background=True,get_glint_mask=False)
+
+    im_list = [im_aligned,corrected[-1],corrected_background[-1]]
+    title_list = [r'$R_T$',r'$R_T\prime$',r'$R_{T,BG}\prime$']
+    
+    compare_plots(im_list, title_list, bbox)
+    return (corrected,corrected_background)
+
+def compare_correction_algo(im_aligned,bbox,corrected_Hedley = None, corrected_SUGAR = None,  iter=3):
     """
     :param im_aligned (np.ndarray): reflectance image
     :param bbox (tuple): bbox over glint area for Hedley algorithm
     :param iter (int): number of iterations for SUGAR algorithm
     compare SUGAR and Hedley algorithm
     """
-    HH = Hedley.Hedley(im_aligned,bbox,smoothing=False,glint_mask=False)
-    corrected_Hedley = HH.get_corrected_bands(plot=False)
-    corrected_Hedley = np.stack(corrected_Hedley,axis=2)
+    if corrected_Hedley is None:
+        HH = Hedley.Hedley(im_aligned,bbox,smoothing=False,glint_mask=False)
+        corrected_Hedley = HH.get_corrected_bands(plot=False)
+        corrected_Hedley = np.stack(corrected_Hedley,axis=2)
 
-    corrected_bands = sugar.correction_iterative(im_aligned,iter=iter,plot=False)
-    corrected_SUGAR = corrected_bands[-1]
+    if corrected_SUGAR is None:
+        corrected_bands = sugar.correction_iterative(im_aligned,iter=iter,bounds = [(1,2)],estimate_background=True,get_glint_mask=False,plot=False)
+        corrected_SUGAR = corrected_bands[-1]
 
     rgb_bands = [2,1,0]
-    fig, axes = plt.subplots(1,3,figsize=(12,5))
+    ((x1,y1),(x2,y2)) = bbox
+    coord, w, h = mutils.bboxes_to_patches(bbox)
+    wavelengths = mutils.sort_bands_by_wavelength()
+    wavelength_dict = {i[0]:i[1] for i in wavelengths}
+
+    
     im_list = [im_aligned,corrected_Hedley,corrected_SUGAR]
     title_list = ['Original','Hedley',f'SUGAR (iters: {iter})']
-    for im, title, ax in zip(im_list,title_list,axes.flatten()):
-        ax.imshow(np.take(im,rgb_bands,axis=2))
-        ax.set_title(title + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
-        ax.axis('off')
 
-    coord, w, h = mutils.bboxes_to_patches(bbox)
-    rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
-    axes[1].add_patch(rect)
+    og_avg_reflectance = [np.mean(im_aligned[y1:y2,x1:x2,band_number]) for band_number in range(im_aligned.shape[-1])]
+    x = list(wavelength_dict.values())
+    og_y = [og_avg_reflectance[i] for i in list(wavelength_dict)]
+        
+    fig, axes = plt.subplots(4,len(im_list),figsize=(12,14))
+    for i,(im, title) in enumerate(zip(im_list,title_list)): #iterate acoss column
+        # plot image
+        rgb_im = np.take(im,rgb_bands,axis=2)
+        axes[0,i].imshow(rgb_im)
+        axes[0,i].set_title(title + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
+        axes[0,i].axis('off')
+        rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
+        axes[0,i].add_patch(rect)
+        # plot original reflectance
+        axes[1,i].plot(x,og_y,label=r'$R_T(\lambda)$')
+        # plot corrected reflectance
+        if i > 0:
+            avg_reflectance = [np.mean(im[y1:y2,x1:x2,band_number]) for band_number in range(im_aligned.shape[-1])]
+            y = [avg_reflectance[i] for i in list(wavelength_dict)]
+            axes[1,i].plot(x,y,label=r'$R_T(\lambda)\prime$')
+        axes[1,i].legend(loc="upper right")
+        axes[1,i].set_title(r'$R_T(\lambda)\prime$'+' in AOI')
+        axes[1,i].set_xlabel('Wavelengths (nm)')
+        axes[1,i].set_ylabel('Reflectance')
+
+        # plot cropped rgb
+        rgb_cropped = rgb_im[y1:y2,x1:x2,:]
+        axes[2,i].imshow(rgb_cropped)
+        axes[2,i].set_title('AOI')
+        axes[2,i].plot([0,w-1],[abs(h)//2,abs(h)//2],color="red",linewidth=3,alpha=0.5)
+        # plot reflectance along red line
+        for j,c in enumerate(['r','g','b']):
+            axes[3,i].plot(list(range(w)),rgb_cropped[h//2,:,j],c=c,alpha=0.5,label=c)
+        axes[3,i].set_xlabel('Image position')
+        axes[3,i].set_ylabel('Reflectance')
+        axes[3,i].legend(loc="upper right")
+        axes[3,i].set_title(r'$R_T(\lambda)\prime$'+' along red line')
+    
+    y1,y2 = axes[3,0].get_ylim()
+    for i in range(len(im_list)):
+        axes[3,i].set_ylim(y1,y2)
+    
+    plt.tight_layout()
     plt.show()
+
     return

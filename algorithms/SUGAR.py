@@ -19,7 +19,7 @@ from math import ceil
 
 # SUn-Glint-Aware Restoration (SUGAR):A sweet and simple algorithm for correcting sunglint
 class SUGAR:
-    def __init__(self, im_aligned,bounds=[(1,2)]*10,sigma=1,estimate_background=True):
+    def __init__(self, im_aligned,bounds=[(1,2)],sigma=1,estimate_background=True):
         """
         :param im_aligned (np.ndarray): band aligned and calibrated & corrected reflectance image
         :param bounds (a list of tuple): lower and upper bound for optimisation of b for each band
@@ -28,12 +28,12 @@ class SUGAR:
         """
         self.im_aligned = im_aligned
         self.sigma = sigma
-        self.bounds = bounds
         self.estimate_background = estimate_background
         # import wavelengths for each band
         wavelengths = mutils.sort_bands_by_wavelength()
         self.wavelength_dict = {i[0]:i[1] for i in wavelengths}
         self.n_bands = im_aligned.shape[-1]
+        self.bounds = bounds*self.n_bands
         self.NIR_band = list(self.wavelength_dict)[-1]
         self.R_min = np.percentile(self.im_aligned[:,:,self.NIR_band].flatten(),5,interpolation='nearest')
 
@@ -253,79 +253,53 @@ class SUGAR:
         Show corrected and original rgb image, mean reflectance
         """
         ((x1,y1),(x2,y2)) = bbox
+        coord, w, h = mutils.bboxes_to_patches(bbox)
         corrected_bands = self.get_corrected_bands(plot=False)
+        corrected_bands = np.stack(corrected_bands,axis=2)
         rgb_bands = [2,1,0]
 
         fig, axes = plt.subplots(2,4,figsize=(14,10))
-        #non-corrected images and reflectance for bbox
-        rgb_im = np.take(self.im_aligned,rgb_bands,axis=2)
-        glint_area = self.im_aligned[y1:y2,x1:x2,:]
-        avg_reflectance = [np.mean(glint_area[:,:,band_number]) for band_number in range(self.n_bands)]
+        for im, title, ax in zip([self.im_aligned,corrected_bands],['Original RGB','Corrected RGB'],axes[0,:2]):
+            ax.imshow(np.take(im,rgb_bands,axis=2))
+            ax.set_title(title)
+            ax.axis('off')
+            rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
+            ax.add_patch(rect)
         
-        #corrected images and reflectance for bbox
-        rgb_im_corrected = np.stack([corrected_bands[i] for i in rgb_bands],axis=2)
-        avg_reflectance_corrected = [np.mean(corrected_bands[band_number][y1:y2,x1:x2]) for band_number in range(self.n_bands)]
-        
-        # plot original rgb
-        axes[0,0].imshow(rgb_im)
-        axes[0,0].set_title('Original RGB')
-        coord, w, h = mutils.bboxes_to_patches(bbox)
-        rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
-        axes[0,0].add_patch(rect)
-        # plot corrected rgb
-        axes[0,1].imshow(rgb_im_corrected)
-        axes[0,1].set_title('Corrected RGB')
-        rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
-        axes[0,1].add_patch(rect)
-        # reflectance
-        axes[0,2].plot(list(self.wavelength_dict.values()),[avg_reflectance[i] for i in list(self.wavelength_dict)], label='Original')
-        axes[0,2].plot(list(self.wavelength_dict.values()),[avg_reflectance_corrected[i] for i in list(self.wavelength_dict)], label='Corrected')
+        for im,label in zip([self.im_aligned,corrected_bands],[r'$R_T$',r'$R_T\prime$']):
+            avg_reflectance = [np.mean(im[y1:y2,x1:x2,band_number]) for band_number in range(self.im_aligned.shape[-1])]
+            axes[0,2].plot(list(self.wavelength_dict.values()),[avg_reflectance[i] for i in list(self.wavelength_dict)],label=label)
+
         axes[0,2].set_xlabel('Wavelengths (nm)')
         axes[0,2].set_ylabel('Reflectance')
         axes[0,2].legend(loc='upper right')
-        axes[0,2].set_title('Corrected and original mean reflectance')
+        axes[0,2].set_title(r'$R_T(\lambda)$ and $R_T(\lambda)\prime$')
 
-        residual = [og-cor for og,cor in zip(avg_reflectance,avg_reflectance_corrected)]
+        residual = self.im_aligned - corrected_bands
+        residual = np.mean(residual[y1:y2,x1:x2,:],axis=(0,1))
         axes[0,3].plot(list(self.wavelength_dict.values()),[residual[i] for i in list(self.wavelength_dict)])
         axes[0,3].set_xlabel('Wavelengths (nm)')
-        axes[0,3].set_ylabel('Residual in Reflectance')
-
-        for ax in axes[0,:2]:
-            ax.axis('off')
+        axes[0,3].set_ylabel('Reflectance difference')
+        axes[0,3].set_title(r'$R_T(\lambda) - R_T(\lambda)\prime$')
         
         h = y2 - y1
         w = x2 - x1
 
-        axes[1,0].imshow(rgb_im[y1:y2,x1:x2,:])
-        axes[1,1].imshow(rgb_im_corrected[y1:y2,x1:x2,:])
-        axes[1,0].set_title('Original Glint')
-        axes[1,1].set_title('Corrected Glint')
-
-        axes[1,0].plot([0,h],[h//2,h//2],color="red",linewidth=3)
-        axes[1,1].plot([0,h],[h//2,h//2],color="red",linewidth=3)
+        for i, (im, title, ax) in enumerate(zip([self.im_aligned,corrected_bands],[r'$R_T$',r'$R_T\prime$'],axes[1,:2])):
+            rgb_cropped = np.take(im[y1:y2,x1:x2,:],rgb_bands,axis=2)
+            ax.imshow(rgb_cropped)
+            ax.set_title(title)
+            ax.axis('off')
+            ax.plot([0,w],[h//2,h//2],color="red",linewidth=3,alpha=0.5)
+            for j,c in enumerate(['r','g','b']):
+                axes[1,i+2].plot(list(range(w)),rgb_cropped[h//2,:,j],c=c,alpha=0.5,label=c)
+            axes[1,i+2].set_xlabel('Width of image')
+            axes[1,i+2].set_ylabel('Reflectance')
+            axes[1,i+2].legend(loc="upper right")
+            axes[1,i+2].set_title(f'{title} along red line')
         
-        # for ax in axes[1,0:2]:
-        #     ax.axis('off')
-
-        for i,c in zip(range(3),['r','g','b']):
-            axes[1,2].plot(list(range(w)),rgb_im[y1:y2,x1:x2,:][h//2,:,i],c=c)
-            # plot for original
-        for i,c in zip(range(3),['r','g','b']):
-            # plot for corrected reflectance
-            axes[1,2].plot(list(range(w)),rgb_im_corrected[y1:y2,x1:x2,:][h//2,:,i],c=c,ls='--')
-
-        axes[1,2].set_xlabel('Width of image')
-        axes[1,2].set_ylabel('Reflectance')
-        axes[1,2].set_title('Reflectance along red line')
-
-        residual = rgb_im[y1:y2,x1:x2,:][h//2,:,:] - rgb_im_corrected[y1:y2,x1:x2,:][h//2,:,:]
-        for i,c in zip(range(3),['r','g','b']):
-            axes[1,3].plot(list(range(w)),residual[:,i],c=c)
-
-        axes[1,3].set_xlabel('Width of image')
-        axes[1,3].set_ylabel('Residual in Reflectance')
-        axes[1,3].set_title('Reflectance along red line')
-
+        y1,y2 = axes[1,2].get_ylim()
+        axes[1,3].set_ylim(y1,y2)
         plt.tight_layout()
         plt.show()
 
@@ -367,7 +341,7 @@ class SUGAR:
             plt.close()
         return
 
-def correction_iterative(im_aligned,iter=3,bounds = [(1,2)]*10,estimate_background=True,get_glint_mask=False,plot=False):
+def correction_iterative(im_aligned,iter=3,bounds = [(1,2)],estimate_background=True,get_glint_mask=False,plot=False):
     """
     :param im_aligned (np.ndarray): band aligned and calibrated & corrected reflectance image
     :param iter (int): number of iterations to run the sugar algorithm
