@@ -54,12 +54,13 @@ def align_captures(cap,img_type = "reflectance"):
     im_aligned = imageutils.aligned_capture(cap, warp_matrices, warp_mode, cropped_dimensions, None, img_type=img_type)
     return im_aligned
 
-def get_rgb(im_aligned, normalisation = True, plot=True):
+def get_rgb(im_aligned, normalisation = False, plot=True, save_dir=None):
     """
     get rgb image from multispectral imae
     :param im_aligned (np.ndarray): multispectral image of dims (m,n,c), where c = 10. output from align_captures
     :param normalisation (bool): whether to normalise the rgb image for better contrast or not
     :param plot (bool): whether to plot the images or not
+    
     """
     rgb_band_indices = [2,1,0]
 
@@ -75,10 +76,14 @@ def get_rgb(im_aligned, normalisation = True, plot=True):
         im_display = np.take(im_aligned,rgb_band_indices,axis=2)
 
     if plot is True:
-        plt.figure(figsize=(10,10))
+        fig = plt.figure()
         plt.imshow(im_display)
-        plt.show()
-
+        plt.axis('off')
+        if save_dir is not None:
+            fig.savefig('{}.png'.format(save_dir), bbox_inches='tight', pad_inches=0)
+            plt.close()
+        else:
+            plt.show()
     return im_display
     
 

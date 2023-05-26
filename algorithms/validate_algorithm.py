@@ -15,6 +15,7 @@ import mutils
 import extract_spectral as espect
 import algorithms.Hedley as Hedley
 import algorithms.SUGAR as sugar
+import algorithms.Goodman as Goodman
 from algorithms.GLORIA import GloriaSimulate
 from skimage.transform import resize
 from scipy.ndimage import gaussian_filter,laplace, gaussian_laplace
@@ -570,11 +571,12 @@ class EvaluateCorrection:
         plt.show()
         return 
 
-def compare_plots(im_list, title_list, bbox=None):
+def compare_plots(im_list, title_list, bbox=None, save_dir = None):
     """
     :param im_list (list of np.ndarray): where the first item is always the original image
     :param title_list (list of str): the title for the first row
     :param bbox (tuple): bbox over glint area for Hedley algorithm
+    :param save_dir (str): Full filepath required. if None, no figure is saved.
     """
     rgb_bands = [2,1,0]
     wavelengths = mutils.sort_bands_by_wavelength()
@@ -585,15 +587,17 @@ def compare_plots(im_list, title_list, bbox=None):
     if bbox is not None:
         ((x1,y1),(x2,y2)) = bbox
         coord, w, h = mutils.bboxes_to_patches(bbox)
-        plot_height = 14
+        plot_height = 12
         plot_row = 4
     else:
-        plot_height = 11
+        plot_height = 9
         plot_row = 3
 
     fig, axes = plt.subplots(plot_row,len(im_list),figsize=(plot_width,plot_height))
-
-    og_avg_reflectance = [np.mean(im_list[0][y1:y2,x1:x2,band_number]) for band_number in range(n_bands)]
+    if bbox is not None:
+        og_avg_reflectance = [np.mean(im_list[0][y1:y2,x1:x2,band_number]) for band_number in range(n_bands)]
+    else:
+        og_avg_reflectance = [np.mean(im_list[0][:,:,band_number]) for band_number in range(n_bands)]
     x = list(wavelength_dict.values())
     og_y = [og_avg_reflectance[i] for i in list(wavelength_dict)]
 
@@ -613,7 +617,7 @@ def compare_plots(im_list, title_list, bbox=None):
             if bbox is not None:
                 avg_reflectance = [np.mean(im[y1:y2,x1:x2,band_number]) for band_number in range(n_bands)]
             else:
-                avg_reflectance = [np.mean(im) for band_number in range(n_bands)]
+                avg_reflectance = [np.mean(im[:,:,band_number]) for band_number in range(n_bands)]
             y = [avg_reflectance[i] for i in list(wavelength_dict)]
             axes[1,i].plot(x,y,label=r'$R_T(\lambda)\prime$')
         axes[1,i].legend(loc="upper right")
@@ -630,6 +634,7 @@ def compare_plots(im_list, title_list, bbox=None):
         
         row_idx = 3 if bbox is not None else 2
         h = nrow if bbox is None else h
+        w = ncol if bbox is None else w
         # plot reflectance along red line
         for j,c in enumerate(['r','g','b']):
             axes[row_idx,i].plot(list(range(w)),rgb_cropped[h//2,:,j],c=c,alpha=0.5,label=c)
@@ -643,17 +648,24 @@ def compare_plots(im_list, title_list, bbox=None):
         axes[row_idx,i].set_ylim(y1,y2)
     
     plt.tight_layout()
-    plt.show()
+    
+
+    if save_dir is not None:
+        fig.savefig('{}.png'.format(save_dir))
+        plt.close()
+    else:
+        plt.show()
     return
 
 
-def compare_sugar_algo(im_aligned,bbox=None,corrected = None, corrected_background = None, iter=3, bounds=[(1,2)]):
+def compare_sugar_algo(im_aligned,bbox=None,corrected = None, corrected_background = None, iter=3, bounds=[(1,2)], save_dir = None):
     """
     :param im_aligned (np.ndarray): reflectance image
     :param bbox (tuple): bbox over glint area for Hedley algorithm
-    :param corrected (np.ndarray): corrected for glint without taking into account of background
-    :param corrected_background (np.ndarray): corrected for glint taking into account of background
+    :param corrected (np.ndarray): corrected for glint using SUGAR without taking into account of background
+    :param corrected_background (np.ndarray): corrected for glint using SUGAR taking into account of background
     :param iter (int): number of iterations for SUGAR algorithm
+    :param save_dir (str): Full filepath required. if None, no figure is saved.
     compare SUGAR algorithm, whether to take into account of background spectra
     returns a tuple (corrected, corrected_background)
     """
@@ -665,14 +677,15 @@ def compare_sugar_algo(im_aligned,bbox=None,corrected = None, corrected_backgrou
     im_list = [im_aligned,corrected[-1],corrected_background[-1]]
     title_list = [r'$R_T$',r'$R_T\prime$',r'$R_{T,BG}\prime$']
     
-    compare_plots(im_list, title_list, bbox)
+    compare_plots(im_list, title_list, bbox, save_dir)
     return (corrected,corrected_background)
 
-def compare_correction_algo(im_aligned,bbox,corrected_Hedley = None, corrected_SUGAR = None,  iter=3):
+def compare_correction_algo(im_aligned,bbox,corrected_Hedley = None, corrected_Goodman = None, corrected_SUGAR = None, iter=3, save_dir = None):
     """
     :param im_aligned (np.ndarray): reflectance image
     :param bbox (tuple): bbox over glint area for Hedley algorithm
     :param iter (int): number of iterations for SUGAR algorithm
+    :param save_dir (str): Full filepath required. if None, no figure is saved.
     compare SUGAR and Hedley algorithm
     """
     if corrected_Hedley is None:
@@ -680,63 +693,16 @@ def compare_correction_algo(im_aligned,bbox,corrected_Hedley = None, corrected_S
         corrected_Hedley = HH.get_corrected_bands(plot=False)
         corrected_Hedley = np.stack(corrected_Hedley,axis=2)
 
+    if corrected_Goodman is None:
+        GM = Goodman.Goodman(im_aligned)
+        corrected_Goodman = GM.get_corrected_bands()
+        corrected_Goodman = np.stack(corrected_Goodman,axis=2)
+
     if corrected_SUGAR is None:
-        corrected_bands = sugar.correction_iterative(im_aligned,iter=iter,bounds = [(1,2)],estimate_background=True,get_glint_mask=False,plot=False)
-        corrected_SUGAR = corrected_bands[-1]
-
-    rgb_bands = [2,1,0]
-    ((x1,y1),(x2,y2)) = bbox
-    coord, w, h = mutils.bboxes_to_patches(bbox)
-    wavelengths = mutils.sort_bands_by_wavelength()
-    wavelength_dict = {i[0]:i[1] for i in wavelengths}
-
+        corrected_SUGAR = sugar.correction_iterative(im_aligned,iter=iter,bounds = [(1,2)],estimate_background=True,get_glint_mask=False,plot=False)
     
-    im_list = [im_aligned,corrected_Hedley,corrected_SUGAR]
-    title_list = ['Original','Hedley',f'SUGAR (iters: {iter})']
-
-    og_avg_reflectance = [np.mean(im_aligned[y1:y2,x1:x2,band_number]) for band_number in range(im_aligned.shape[-1])]
-    x = list(wavelength_dict.values())
-    og_y = [og_avg_reflectance[i] for i in list(wavelength_dict)]
-        
-    fig, axes = plt.subplots(4,len(im_list),figsize=(12,14))
-    for i,(im, title) in enumerate(zip(im_list,title_list)): #iterate acoss column
-        # plot image
-        rgb_im = np.take(im,rgb_bands,axis=2)
-        axes[0,i].imshow(rgb_im)
-        axes[0,i].set_title(title + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
-        axes[0,i].axis('off')
-        rect = patches.Rectangle(coord, w, h, linewidth=1, edgecolor='red', facecolor='none')
-        axes[0,i].add_patch(rect)
-        # plot original reflectance
-        axes[1,i].plot(x,og_y,label=r'$R_T(\lambda)$')
-        # plot corrected reflectance
-        if i > 0:
-            avg_reflectance = [np.mean(im[y1:y2,x1:x2,band_number]) for band_number in range(im_aligned.shape[-1])]
-            y = [avg_reflectance[i] for i in list(wavelength_dict)]
-            axes[1,i].plot(x,y,label=r'$R_T(\lambda)\prime$')
-        axes[1,i].legend(loc="upper right")
-        axes[1,i].set_title(r'$R_T(\lambda)\prime$'+' in AOI')
-        axes[1,i].set_xlabel('Wavelengths (nm)')
-        axes[1,i].set_ylabel('Reflectance')
-
-        # plot cropped rgb
-        rgb_cropped = rgb_im[y1:y2,x1:x2,:]
-        axes[2,i].imshow(rgb_cropped)
-        axes[2,i].set_title('AOI')
-        axes[2,i].plot([0,w-1],[abs(h)//2,abs(h)//2],color="red",linewidth=3,alpha=0.5)
-        # plot reflectance along red line
-        for j,c in enumerate(['r','g','b']):
-            axes[3,i].plot(list(range(w)),rgb_cropped[h//2,:,j],c=c,alpha=0.5,label=c)
-        axes[3,i].set_xlabel('Image position')
-        axes[3,i].set_ylabel('Reflectance')
-        axes[3,i].legend(loc="upper right")
-        axes[3,i].set_title(r'$R_T(\lambda)\prime$'+' along red line')
-    
-    y1,y2 = axes[3,0].get_ylim()
-    for i in range(len(im_list)):
-        axes[3,i].set_ylim(y1,y2)
-    
-    plt.tight_layout()
-    plt.show()
+    im_list = [im_aligned,corrected_Hedley,corrected_Goodman,corrected_SUGAR[-1]]
+    title_list = ['Original ','Hedley ','Goodman ',f'SUGAR (iters: {iter})']
+    compare_plots(im_list, title_list, bbox, save_dir)
 
     return

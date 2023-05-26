@@ -15,6 +15,7 @@ import matplotlib.patches as patches
 import matplotlib.colors as colors
 import matplotlib.cm as cmx
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from mpl_toolkits.axes_grid1 import ImageGrid
 import numpy as np
 from scipy import ndimage
 from scipy import stats
@@ -38,20 +39,21 @@ class UncertaintyEst:
         self.n_bands = len(list(self.wavelength_dict))
 
     @classmethod
-    def get_corrected_image(cls,im_aligned,iter=3,bounds = [(1,2)]*10):
+    def get_corrected_image(cls,im_aligned,iter=3,bounds = [(1,2)]):
         
         corrected_im_background, glint_mask = sugar.correction_iterative(im_aligned,iter=iter, bounds = bounds,estimate_background=True,get_glint_mask=True)
         corrected_im = sugar.correction_iterative(im_aligned,iter=iter, bounds = bounds,estimate_background=False,get_glint_mask=False)
         
         return cls(im_aligned,corrected_im_background,corrected_im,glint_mask)
 
-    def get_glint_kde(self,NIR_band=3,add_weights=False, plot=True):
+    def get_glint_kde(self,NIR_band=3,add_weights=False, plot=True,save_dir=None):
         """ 
         :param im_aligned (np.ndarray) band-aligned image from:
             RI = espect.ReflectanceImage(cap)
             im_aligned = RI.get_aligned_reflectance()
         :param glint_mask (np.ndarray): where 1 is glint, 0 is non-glint
         :param NIR_band (int): band number e.g. NIR band to extract the glint mask
+        :param save_dir (str): Full filepath required. if None, no figure is saved.
         returns KDE map of glint mask to estimate the spatial probability distribution of glint. sum of KDE map = 1
         """
         if self.glint_mask is not None:
@@ -87,23 +89,37 @@ class UncertaintyEst:
             if plot is True:
                 # plot contours of the density
                 levels = np.linspace(0, Z.max(), 25)
+                fig = plt.figure(figsize=(10,5))
+                grid = ImageGrid(fig, 111,
+                                nrows_ncols = (1,2),
+                                axes_pad = 0.05,
+                                cbar_location = "right",
+                                cbar_mode="single",
+                                cbar_size="5%",
+                                cbar_pad=0.05
+                                )
+                grid[0].imshow(np.take(self.im_aligned,[2,1,0],axis=2))
+                grid[0].set_title('Original RGB image')
+                im = grid[1].contourf(X, Y, Z, levels=levels, cmap=plt.cm.RdGy_r)
+                grid[1].set_title('Glint mask KDE')
+                cbar = plt.colorbar(im, cax=grid.cbar_axes[0])
+                cbar.ax.set_ylabel('PDF')
+                for g in grid:
+                    g.set_aspect('equal')
+                    g.axis('off')
+                
+                if save_dir is not None:
+                    fig.savefig('{}.png'.format(save_dir))
+                    plt.close()
+                else:
+                    plt.show()
 
-                fig, axes = plt.subplots(1,2,figsize=(10,5),sharex=True)
-                axes[0].imshow(np.take(self.im_aligned,[2,1,0],axis=2))
-                axes[0].set_title('Original RGB image')
-                im = axes[1].contourf(X, Y, np.flipud(Z), levels=levels, cmap=plt.cm.RdGy_r)
-                axes[1].set_aspect('equal')
-                axes[1].set_title('Glint mask KDE')
-                fig.colorbar(im,ax=axes[1])
-                for ax in axes:
-                    ax.axis('off')
-                plt.show()
             return resize(Z,(nrow,ncol),anti_aliasing=True)
         
         else:
             return None
         
-    def get_uncertainty_bounds(self,get_upper_and_lower_bounds = False, plot = True):
+    def get_uncertainty_bounds(self,get_upper_and_lower_bounds = False, plot = True, save_dir = None):
         """
         returns lower, upper bound and total variance of all iterations in band order i.e. 0,1,2,3,4,5,6,7,8,9
         returns np.ndarray of total uncertainty in terms of variance across all iterations
@@ -132,7 +148,8 @@ class UncertaintyEst:
             values = range(n_bands)
             nrow, ncol = total_uncertainty.shape[0], total_uncertainty.shape[1]
             n = nrow*ncol
-            fig, axes = plt.subplots(n_bands,2,figsize=(9,20))
+
+            fig, axes = plt.subplots(n_bands,2,figsize=(7,18))
             for i,(band_number,wavelength) in enumerate(self.wavelength_dict.items()):
                 colorVal = scalarMap.to_rgba(values[i],alpha=0.3)
                 # column 0 shows the spatial distribution of uncertainty
@@ -148,5 +165,10 @@ class UncertaintyEst:
                 axes[i,1].set_title(f'{wavelength} nm (N = {n})')
                 fig.colorbar(im,ax=axes[i,0])
             plt.tight_layout()
-            plt.show()
+            
+            if save_dir is not None:
+                fig.savefig('{}.png'.format(save_dir))
+                plt.close()
+            else:
+                plt.show()
         return total_uncertainty if get_upper_and_lower_bounds is False else (lower_bound_uncertainty, upper_bound_uncertainty, total_uncertainty)

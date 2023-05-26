@@ -17,6 +17,11 @@ from scipy import ndimage
 from scipy.optimize import minimize_scalar
 from math import ceil
 
+import algorithms.Hedley as Hedley
+import algorithms.Goodman as Goodman
+import algorithms.validate_algorithm as ValidateAlgo
+import algorithms.uncertainty_estimation as uncertainty
+
 # SUn-Glint-Aware Restoration (SUGAR):A sweet and simple algorithm for correcting sunglint
 class SUGAR:
     def __init__(self, im_aligned,bounds=[(1,2)],sigma=1,estimate_background=True):
@@ -379,3 +384,62 @@ def correction_iterative(im_aligned,iter=3,bounds = [(1,2)],estimate_background=
         # bounds = [(1,b*1.2) for b in b_list]
     
     return corrected_images if get_glint_mask is False else (corrected_images,glint_mask)
+
+class SUGARpipeline:
+    def __init__(self,im_aligned,bbox,iter=3,bounds=[(1,2)],filename=None):
+        """
+        :param im_aligned (np.ndarray): band aligned and calibrated & corrected reflectance image
+        :param bbox (tuple): bbox over glint area for Hedley algorithm
+        :param filename (str): Full filepath required. if None, no figure is saved.
+        :param bounds (a list of tuple): lower and upper bound for optimisation of b for each band
+        """
+        self.im_aligned = im_aligned
+        self.bbox = bbox
+        self.iter = iter
+        self.filename = os.path.splitext(filename)[0] if isinstance(filename,str) else None
+        # import wavelengths for each band
+        wavelengths = mutils.sort_bands_by_wavelength()
+        self.wavelength_dict = {i[0]:i[1] for i in wavelengths}
+        self.n_bands = im_aligned.shape[-1]
+        self.bounds = bounds*self.n_bands
+
+    def main(self):
+        corrected_im_background, glint_mask = correction_iterative(self.im_aligned,iter=self.iter, bounds = self.bounds,estimate_background=True,get_glint_mask=True)
+        corrected_im = correction_iterative(self.im_aligned,iter=self.iter, bounds = self.bounds,estimate_background=False,get_glint_mask=False)
+        # save images
+        parent_dir = os.path.join(os.getcwd(),"saved_plots")
+        if not os.path.exists(parent_dir):
+            os.mkdir(parent_dir)
+        
+        rgb_dir = os.path.join(parent_dir,'rgb')
+        if not os.path.exists(rgb_dir):
+            os.mkdir(rgb_dir)
+        rgb_fp = os.path.join(rgb_dir,self.filename)
+
+        compare_algo_dir = os.path.join(parent_dir,'compare_algo')
+        if not os.path.exists(compare_algo_dir):
+            os.mkdir(compare_algo_dir)
+        compare_algo_fp = os.path.join(compare_algo_dir,self.filename)
+
+        uncertainty_dir = os.path.join(parent_dir,'uncertainty')
+        if not os.path.exists(uncertainty_dir):
+            os.mkdir(uncertainty_dir)
+        uncertainty_fp = os.path.join(uncertainty_dir,self.filename)
+
+        # save rgb_images
+        mutils.get_rgb(self.im_aligned, normalisation = False, plot=True, save_dir=rgb_fp+f'iter0')
+        for i in range(len(corrected_im)):
+            mutils.get_rgb(corrected_im_background[i], normalisation = False, plot=True, save_dir=rgb_fp+f'iter{i+1}_BG')
+            mutils.get_rgb(corrected_im[i], normalisation = False, plot=True, save_dir=rgb_fp+f'iter{i+1}')
+        # validate with other algo
+        ValidateAlgo.compare_sugar_algo(self.im_aligned,bbox=self.bbox,corrected = corrected_im, corrected_background = corrected_im_background, iter=self.iter, bounds=self.bounds, 
+                                        save_dir = compare_algo_fp+'_sugar')
+        ValidateAlgo.compare_correction_algo(self.im_aligned,self.bbox,corrected_Hedley = None, corrected_Goodman = None, corrected_SUGAR = corrected_im_background, iter=self.iter, 
+                                             save_dir = compare_algo_fp)
+        # uncertainty estimation
+        UE = uncertainty.UncertaintyEst(self.im_aligned,corrected_im_background, corrected_im,glint_mask=glint_mask)
+        UE.get_uncertainty_bounds(save_dir = uncertainty_fp)
+        UE.get_glint_kde(save_dir = uncertainty_fp+'_kde')
+        return
+
+
