@@ -389,7 +389,11 @@ class SimulateBackground:
             rgb_im = np.take(im,self.rgb_bands,axis=2)
             axes[0,i].imshow(rgb_im)
             axes[0,i].plot([0,ncol-1],[self.y_line]*2,c='r',linewidth=3,alpha=0.5)
-            axes[0,i].set_title(title + r'($\sigma^2_T$' + f': {np.var(im):.4f})')
+            # get RMSE
+            y = water_spectra.flatten()
+            y_hat = im.flatten()
+            rmse = (np.sum(((y-y_hat)**2))/y.shape[0])**(1/2)
+            axes[0,i].set_title(title + r'\n($\sigma^2_T$' + f': {np.var(im):.4f}), RMSE = {rmse:.4f}')
             # plot original reflectance
             axes[1,i].plot(x,og_y,label=r'$R_{BG}(\lambda)$')
             # plot simulated glint reflectance
