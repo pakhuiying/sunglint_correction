@@ -51,20 +51,29 @@ class Kutser:
         cropped_wavelengths = [sorted_wavelengths[i] for i in idx]
         return cropped_wavelengths,cropped_R
     
-    def get_coefficients(self):
+    def get_corrected_bands(self):
         nrow, ncol, n_bands = self.im_aligned.shape
         power_fun = lambda x,a,b: a*x**-b
 
         R = self.get_reflectance_by_wavelength()
         cropped_wavelengths,cropped_R = self.extract_extreme_wavelengths(R)
+
         coeff_list = []
         for i in range(cropped_R.shape[0]):
-            popt, _ = curve_fit(power_fun, cropped_wavelengths, cropped_R[i,:])
-            coeff_list.append(popt)
-        return coeff_list
+            try:
+                popt, _ = curve_fit(power_fun, cropped_wavelengths, cropped_R[i,:],p0=[50,1],maxfev=50)
+                coeff_list.append(popt)
+            except:
+                coeff_list.append(np.array([0,0]))
 
-    def get_corrected_bands(self):
-        nrow, ncol, n_bands = self.im_aligned.shape
-        power_fun = lambda x,a,b: a*x**-b
+        A = np.array([i[0] for i in coeff_list])#.reshape(nrow,ncol)
+        B = np.array([i[1] for i in coeff_list])#.reshape(nrow,ncol)
+
+        y_fit = np.zeros((nrow*ncol,n_bands))
+        sorted_wavelengths = list(self.wavelength_dict.values())
+        for i in range(A.shape[0]):
+            y_fit[i,:] = power_fun(sorted_wavelengths, A[i],B[i])
         
-    
+        y_fit.reshape(self.im_aligned.shape)
+        corrected_bands = self.im_aligned - y_fit
+        return corrected_bands
