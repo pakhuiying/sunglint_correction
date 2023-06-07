@@ -32,6 +32,7 @@ import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 from pprint import pprint
+import pandas as pd
 
 import exiftool
 from tqdm import tqdm
@@ -100,11 +101,12 @@ def save_capture(params, cap):
             return
 
         if params['output_stack_dir']:
-            output_stack_file_path = os.path.join(params['output_stack_dir'], cap.uuid + '.tif')
+            fn =  os.path.split(cap.images[0].path)[-1]
+            output_stack_file_path = os.path.join(params['output_stack_dir'], fn + '.tif')
             if params['overwrite'] or not os.path.exists(output_stack_file_path):
                 cap.save_capture_as_stack(output_stack_file_path)
         if params['output_rgb_dir']:
-            output_rgb_file_path = os.path.join(params['output_rgb_dir'], cap.uuid + '.jpg')
+            output_rgb_file_path = os.path.join(params['output_rgb_dir'], fn + '.jpg')
             if params['overwrite'] or not os.path.exists(output_rgb_file_path):
                 cap.save_capture_as_rgb(output_rgb_file_path)
 
@@ -195,7 +197,7 @@ class ImageSet(object):
         columns = [
             'timestamp',
             'latitude', 'longitude', 'altitude',
-            'capture_id',
+            'image_name','capture_id',
             'dls-yaw', 'dls-pitch', 'dls-roll'
         ]
         irr = ["irr-{}".format(wve) for wve in self.captures[0].center_wavelengths()]
@@ -204,10 +206,11 @@ class ImageSet(object):
         for cap in self.captures:
             dat = cap.utc_time()
             loc = list(cap.location())
+            image_name = os.path.split(cap.images[0].path)[-1]
             uuid = cap.uuid
             dls_pose = list(cap.dls_pose())
             irr = cap.dls_irradiance()
-            row = [dat] + loc + [uuid] + dls_pose + irr
+            row = [dat] + loc + [image_name] +[uuid] + dls_pose + irr
             data.append(row)
         return data, columns
 
@@ -270,6 +273,13 @@ class ImageSet(object):
             'output_rgb_dir': output_rgb_directory,
             'overwrite': overwrite,
         }
+
+        data, columns = self.as_nested_lists()
+        df = pd.DataFrame.from_records(data, index='timestamp', columns=columns)
+        if os.path.exists(os.path.join(os.path.dirname(output_rgb_directory),'flight_attributes')) is False:
+            output_flight_att_directory = os.path.join(os.path.dirname(output_rgb_directory),'flight_attributes')
+            os.mkdir(output_flight_att_directory)
+        df.to_csv(os.path.join(output_flight_att_directory,'flight_attributes.csv'))
 
         print('Processing {} Captures ...'.format(len(self.captures)))
 
