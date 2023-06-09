@@ -1,11 +1,13 @@
 import matplotlib.pyplot as plt
 import pickle
 import numpy as np
+import pandas as pd
+import datetime
 import os
 import mutils
 import cv2
 from osgeo import gdal, osr
-
+from scipy.interpolate import griddata
 class FlightAttributes:
     def __init__(self,df):
         """ 
@@ -114,34 +116,19 @@ class FlightAttributes:
                 pickle.dump(coord_yaw,fp)
         return coord_yaw
     
-def get_flight_angle(yaw_value):
+def get_flight_angle(coords, ref_vec = np.array([0,1])):
     """ 
-    :param yaw_value (np.ndarray): yaw value from dls-yaw
-    returns flight angle in radians
-    # bug with this piecewise function, doesnt evaluate single values
+    :param coords (np.ndarray): where 1st column is latitude, 2nd column is longitude
+        1st row is startpt of vector, 2nd row is endpt of vector
+    :param ref_vec (np.ndarray): angle with respect to east np.array([0,1]), where latitude, longitude
+    returns angle in degrees wrt to east based on vector between coord0 and coord1
     """
-    t0 = (-np.pi,1.5)
-    t1 = (-1.5,np.pi)
-    t2 = (1.5,0)
-    t3 = (3,1.5) #np.pi,1.5
-
-    k0 = (t1[1]-t0[1])/(t1[0]-t0[0])
-    k1 = (t2[1]-t1[1])/(t2[0]-t1[0])
-    k2 = (t3[1]-t2[1])/(t3[0]-t2[0])
-
-    c0 = t0[1] - k0*t0[0]
-    c1 = t1[1] - k1*t1[0]
-    c2 = t2[1] - k2*t2[0]
-
-    f0 = lambda x: k0*x+c0
-    f1 = lambda x: k1*x+c1
-    f2 = lambda x: k2*x+c2
-
-    x0 = -1.5
-    x1 = 1.5
-
-    y = np.piecewise(yaw_value, [yaw_value <= x0, (yaw_value > x0) & (yaw_value <= x1), yaw_value>x1], [f0, f1, f2])
-    return y
+    vec = np.diff(coords,axis=0)
+    vec_mag = np.linalg.norm(vec,axis=1)
+    vec_mag = np.tile(vec_mag.reshape(-1,1),(1,2))
+    vec = vec/vec_mag #normalised vector
+    angle_array = np.arccos(np.dot(vec,ref_vec))
+    return angle_array/np.pi*180
 
 def get_flight_angle_fn():
     """
@@ -244,8 +231,7 @@ class GeotransformImage:
         """
         fn = f'{fp}.tif'
         rot_im, geotransform = self.geotransform()
-        # flipped_transformed_img = np.fliplr(rot_im) #flip images horizontally because QGIS
-        flipped_transformed_img = np.flipud(rot_im)
+        flipped_transformed_img = np.flipud(rot_im) #flip images because QGIS
         rows, cols = flipped_transformed_img.shape[0],flipped_transformed_img.shape[1]
         n_bands = self.im.shape[-1] if (len(self.im.shape) == 3) else 1
 
@@ -266,7 +252,7 @@ class GeotransformImage:
                 # write 1-band to the raster
             dst_ds.FlushCache()                     # write to disk
             dst_ds = None
-        return rot_im
+        return flipped_transformed_img
 
     def affine_transformation(self, plot = True):
         """angle in degrees"""
@@ -305,3 +291,55 @@ class GeotransformImage:
             axes[1].set_title(f'yaw: {self.yaw:.3f}'+f'\nangle: {angle:.2f}')
             plt.show()
         return rotatingimage
+    
+def interpolate_timestamp(df,milliseconds=100):
+    """
+    :param df (pd.DataFrame): column names must include timestamp, latitude, longitude, altitude, flight_angle
+    :param milliseconds (float): timedelta in milliseconds, interpolate between two timestamps at 100ms frequency
+    linear interpolation using timedelta
+    returns a tuple of (original dataframe, interpolated dataframe)
+    """
+    column_names = ['latitude','longitude','altitude','flight_angle']
+    if not all([i in df.columns for i in column_names]):
+        raise NameError(f'at least one name does not exist: {column_names}')
+    
+    middle_idx = len(df.index)//2
+    # duration = df.index[middle_idx] - df.index[middle_idx-1]
+    freq = datetime.timedelta(milliseconds=milliseconds)#duration//10 # timedelta object
+    timedelta = freq.total_seconds()*1000
+    date_range_list = []
+    for i, rows in df.iterrows():
+        if i == len(df.index) -1:
+            pass
+        else:
+            daterange = pd.date_range(start=rows['timestamp'], end=df['timestamp'][i+1], freq=freq,closed='left').to_series() # date arange
+            daterange = daterange.reset_index()
+            date_range_list.append(daterange.iloc[:,0])
+    
+    interpolated_timestamp = pd.concat(date_range_list)
+    # print(interpolated_timestamp)
+    timedelta_series = interpolated_timestamp - df['timestamp'][0]
+    timedelta_series = timedelta_series.dt.total_seconds() #returns time delta in total_seconds
+
+    og_timestamp = df['timestamp']
+    og_timedelta_series = og_timestamp - df['timestamp'][0]
+    og_timedelta_series = og_timedelta_series.dt.total_seconds()
+    og_dict = {'timestamp': og_timestamp, 'timedelta': og_timedelta_series}
+    for names in column_names:
+        og_dict[names] = df[names]
+    og_df = pd.DataFrame(og_dict)
+    # og_df = pd.DataFrame({'timestamp': og_timestamp, 'timedelta': og_timedelta_series, 
+    #                       'latitude':df['latitude'], 'longitude':df['longitude'],
+    #                       'altitude':df['altitude'], 'flight_angle':df['flight_angle']})
+    interpolated_dict = {'timestamp': interpolated_timestamp,'timedelta':timedelta_series}
+    for names in column_names:
+        interpolated_dict[names] = griddata(og_timedelta_series, df[names], timedelta_series, method='linear')
+    interpolated_df = pd.DataFrame(interpolated_dict)
+    # interpolated_lat = griddata(og_timedelta_series, df['latitude'], timedelta_series, method='linear')
+    # interpolated_lon = griddata(og_timedelta_series, df['longitude'], timedelta_series, method='linear')
+    # interpolated_alt = griddata(og_timedelta_series, df['altitude'], timedelta_series, method='linear')
+    # interpolated_df = pd.DataFrame({'timestamp': interpolated_timestamp,'timedelta':timedelta_series,
+    #                                 'latitude':interpolated_lat, 'longitude':interpolated_lon, 
+    #                                 'altitude': interpolated_alt})
+    
+    return og_df, interpolated_df
