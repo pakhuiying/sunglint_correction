@@ -8,6 +8,7 @@ import mutils
 import cv2
 from osgeo import gdal, osr
 from scipy.interpolate import griddata
+from tqdm import tqdm
 class FlightAttributes:
     def __init__(self,df):
         """ 
@@ -291,7 +292,7 @@ class GeotransformImage:
             axes[1].set_title(f'yaw: {self.yaw:.3f}'+f'\nangle: {angle:.2f}')
             plt.show()
         return rotatingimage
-    
+
 def interpolate_timestamp(df,milliseconds=100):
     """
     :param df (pd.DataFrame): column names must include timestamp, latitude, longitude, altitude, flight_angle
@@ -304,7 +305,6 @@ def interpolate_timestamp(df,milliseconds=100):
         raise NameError(f'at least one name does not exist: {column_names}')
     
     middle_idx = len(df.index)//2
-    # duration = df.index[middle_idx] - df.index[middle_idx-1]
     freq = datetime.timedelta(milliseconds=milliseconds)#duration//10 # timedelta object
     timedelta = freq.total_seconds()*1000
     date_range_list = []
@@ -328,18 +328,67 @@ def interpolate_timestamp(df,milliseconds=100):
     for names in column_names:
         og_dict[names] = df[names]
     og_df = pd.DataFrame(og_dict)
-    # og_df = pd.DataFrame({'timestamp': og_timestamp, 'timedelta': og_timedelta_series, 
-    #                       'latitude':df['latitude'], 'longitude':df['longitude'],
-    #                       'altitude':df['altitude'], 'flight_angle':df['flight_angle']})
+    
     interpolated_dict = {'timestamp': interpolated_timestamp,'timedelta':timedelta_series}
     for names in column_names:
         interpolated_dict[names] = griddata(og_timedelta_series, df[names], timedelta_series, method='linear')
     interpolated_df = pd.DataFrame(interpolated_dict)
-    # interpolated_lat = griddata(og_timedelta_series, df['latitude'], timedelta_series, method='linear')
-    # interpolated_lon = griddata(og_timedelta_series, df['longitude'], timedelta_series, method='linear')
-    # interpolated_alt = griddata(og_timedelta_series, df['altitude'], timedelta_series, method='linear')
-    # interpolated_df = pd.DataFrame({'timestamp': interpolated_timestamp,'timedelta':timedelta_series,
-    #                                 'latitude':interpolated_lat, 'longitude':interpolated_lon, 
-    #                                 'altitude': interpolated_alt})
     
     return og_df, interpolated_df
+
+class InterpolateFlight:
+    def __init__(self, df, column_names = ['latitude','longitude','altitude','flight_angle']):
+        """ 
+        :param df (pd.DataFrame): imported from the folder 'flight_attributes'
+        :param column_names (list of str): column names in df
+        """
+        self.df = df
+        self.column_names = column_names
+    
+    def append_flight_angle(self):
+        """calculate flight angle and append to the df"""
+        df = self.df.copy()
+        column_idx = [i for i,c in enumerate(self.df.columns.to_list()) if c in ['latitude','longitude']]
+        angle_coord_list = [np.NaN]
+        for i,rows in tqdm(self.df.iterrows()):
+            if (i == 0) or (i == len(self.df.index)-1):
+                pass
+            else:
+                # estimate flight angle from 2 adjacent coordinates
+                flight_att_diff = self.df.iloc[[i-1,i+1],column_idx]
+                flight_att_diff = flight_att_diff.iloc[:,:2].values
+                flight_angle_coord = get_flight_angle(flight_att_diff)
+                angle_coord_list.append(flight_angle_coord[0])
+        angle_coord_list.append(np.NaN)
+        df['flight_angle'] = angle_coord_list
+        df = df.ffill(axis=0).bfill(axis=0) #fill forward and fill backward
+        return df
+    
+    def interpolate_flight(self, plot=True):
+        """returns an interpolated df"""
+        flight_attributes_df = self.append_flight_angle()
+        # convert to datetime format
+        flight_attributes_df['timestamp'] = pd.to_datetime(flight_attributes_df['timestamp'])
+        # interpolate df
+        df, df_interpolated = interpolate_timestamp(flight_attributes_df)
+        df_interpolated = df_interpolated.merge(flight_attributes_df,how='outer',on=['timestamp']+self.column_names).ffill(axis=0)
+        # assign unique index for image name
+        df_interpolated['index'] = df_interpolated['image_name'].str.split('_').str[1].astype(int)
+        
+        if plot is True:
+            fig, axes = plt.subplots(1,2,figsize=(10,5))
+            axes[0].scatter(df['longitude'],df['latitude'],c=df['flight_angle'],alpha=0.5)
+            im = axes[1].scatter(df_interpolated['longitude'],df_interpolated['latitude'],c=df_interpolated['flight_angle'],alpha=0.5)
+            cax = plt.colorbar(im,ax=axes[1])
+            cax.set_label('Flight angle (deg)')
+            axes[0].set_title(f'Flight angle ({len(df.index)})')
+            axes[1].set_title(f'Interpolated flight angle ({len(df_interpolated.index)})')
+            for ax in axes:
+                ax.set_xlabel('Longitude')
+                ax.set_ylabel('Latitude')
+            plt.tight_layout()
+            plt.show()
+        
+        return df_interpolated
+    
+
