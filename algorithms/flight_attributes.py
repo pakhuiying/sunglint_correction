@@ -9,6 +9,8 @@ import cv2
 from osgeo import gdal, osr
 from scipy.interpolate import griddata
 from tqdm import tqdm
+from PIL import Image
+from math import ceil
 class FlightAttributes:
     def __init__(self,df):
         """ 
@@ -391,4 +393,157 @@ class InterpolateFlight:
         
         return df_interpolated
     
+class PlotGeoreference:
+    def __init__(self, flight_attributes_df, fp_list, DEM_offset_height = 15):
+        """ 
+        :param flight_attributes_df (pd.DataFrame):  dataframe with flight angle
+        :param fp_list (list of fp): filepath of the thumbnail
+        :param geotransform_list (dict): 
+            where key is the int index of the image
+            where each value is a dict of keys:'lat','lon','lat_res','lon_res'
+        :param im_list (dict): 
+            where key is the int index of the image
+            where each value is an image
+        returns an np.ndarray
+        """
+        self.flight_attributes_df = flight_attributes_df
+        # where keys are image index extracted from the image_name from fp_list
+        self.fp_list = {int(os.path.splitext(os.path.split(fp)[-1])[0].split('_')[1]):fp for fp in fp_list}
+        self.DEM_offset_height = DEM_offset_height
 
+    def get_flight_attributes(self):
+        """ 
+        returns a dict, where keys are image_index that corresponds to image_name
+        """
+        column_idx = [i for i,c in enumerate(self.flight_attributes_df.columns.to_list()) if c in ['latitude','longitude','altitude','flight_angle']]
+
+        # im_list = dict()
+        geotransform_list = dict()
+
+        for i,rows in self.flight_attributes_df.iterrows():
+            flight_att = rows[column_idx].tolist()
+            flight_att[-2] = flight_att[-2] - self.DEM_offset_height
+            flight_angle_coord = rows['flight_angle']
+            flight_angle_coord = flight_angle_coord + 90 if flight_angle_coord > 90 else 90 - flight_angle_coord
+
+            GI = GeotransformImage(None,*flight_att,angle=flight_angle_coord)
+            lat_res, lon_res = GI.get_degrees_per_pixel()
+            lat, lon = rows['latitude'], rows['longitude']
+            img_idx = int(os.path.splitext(rows['image_name'])[0].split('_')[1])
+            geotransform_list[img_idx] = {'lat':lat,'lon':lon,'lat_res':lat_res,'lon_res':lon_res,
+                                    'flight_angle': flight_angle_coord, 'image_fp':self.fp_list[img_idx]}
+        return geotransform_list
+
+    def get_canvas(self):
+        geotransform_list = self.get_flight_attributes()
+        idx = 0
+        lat_max = [idx,0]
+        lat_min = [idx,180]
+        lon_max = [idx,0]
+        lon_min = [idx,180]
+        pixel_res = 1
+        for idx, gt in geotransform_list.items():
+            if gt['lat'] > lat_max[1]:
+                lat_max = [idx,gt['lat']]
+            if gt['lat'] < lat_min[1]:
+                lat_min = [idx,gt['lat']]
+            if gt['lon'] > lon_max[1]:
+                lon_max = [idx,gt['lon']]
+            if gt['lon'] < lon_min[1]:
+                lon_min = [idx, gt['lon']]
+            if gt['lat_res'] < pixel_res:
+                pixel_res = gt['lat_res']
+            if gt['lon_res'] < pixel_res:
+                pixel_res = gt['lon_res']
+        
+        self.pixel_res = pixel_res
+        
+        im_list = dict()
+        for im_type, coord_type in zip(['upper_lat','lower_lat','left_lon','right_lon'],[lat_max,lat_min,lon_min,lon_max]):
+            fp = self.fp_list[coord_type[0]]
+            im = np.asarray(Image.open(fp))
+            GI = GeotransformImage(im,None,None,None,None,angle=geotransform_list[coord_type[0]]['flight_angle'])
+            rot_im = GI.affine_transformation(plot=False)
+            im_list[im_type] = rot_im
+
+        upper_lat = lat_max[1] + ceil(im_list['upper_lat'].shape[0]/2)*pixel_res
+        lower_lat = lat_min[1] - ceil(im_list['lower_lat'].shape[0]/2)*pixel_res
+        left_lon = lon_min[1] - ceil(im_list['left_lon'].shape[1]/2)*pixel_res
+        right_lon = lon_max[1] + ceil(im_list['right_lon'].shape[1]/2)*pixel_res
+
+        self.upper_lat = upper_lat
+        self.lower_lat = lower_lat
+        self.left_lon = left_lon
+        self.right_lon = right_lon
+
+        nrow = ceil((upper_lat - lower_lat)/pixel_res)
+        ncol = ceil((right_lon - left_lon)/pixel_res)
+        im_display = np.zeros((nrow,ncol,3),dtype=np.uint8) #includes alpha channel
+        print(f'shape of canvas{im_display.shape}')
+        return im_display
+    
+    def get_row_col_index(self, lat, lon, lat_res, lon_res, rot_im):
+        """ 
+        :param lat (float): center coord of rot_im
+        :param lon (float): center coord of rot_im
+        :param rot_im (np.ndarray): rotated image
+        returns the upp/low row and column index when provided center lat and lon values
+        """
+        nrow, ncol = rot_im.shape[0], rot_im.shape[1]
+        row_idx = int((self.upper_lat - lat)/self.pixel_res)
+        col_idx = int((lon - self.left_lon)/self.pixel_res)
+        #row_idx and col_idx wrt to center coord
+        upper_row_idx = row_idx - nrow//2
+        upper_row_idx = 0 if upper_row_idx < 0 else upper_row_idx
+        lower_row_idx = upper_row_idx + nrow
+        left_col_idx = col_idx - ncol//2
+        left_col_idx = 0 if left_col_idx < 0 else left_col_idx
+        right_col_idx = left_col_idx + ncol
+        return upper_row_idx, lower_row_idx, left_col_idx, right_col_idx
+
+    
+    def plot_georeference(self, reduction_factor = 5, plot = True):
+        im_display = self.get_canvas()
+        geotransform_list = self.get_flight_attributes()
+        for i, rows in self.flight_attributes_df.iterrows():
+            flight_angle_coord = rows['flight_angle']
+            flight_angle_coord = flight_angle_coord + 90 if flight_angle_coord > 90 else 90 - flight_angle_coord
+
+            img_idx = int(os.path.splitext(rows['image_name'])[0].split('_')[1])
+            fp = self.fp_list[img_idx]
+            # print(rows['image_name'], fp)
+            im = np.asarray(Image.open(fp)) if (os.path.splitext(rows['image_name'])[0] in fp) else None
+            if im is None:
+                raise NameError("image is None because filepath does not match image name")
+            GI = GeotransformImage(im,None,None,None,None,angle=flight_angle_coord)
+            rot_im = GI.affine_transformation(plot=False)
+            rot_im = np.fliplr(np.flipud(rot_im))
+            
+            # print(rot_im.shape)
+            att = geotransform_list[img_idx]
+            upper_row_idx, lower_row_idx, left_col_idx, right_col_idx = self.get_row_col_index(att['lat'],att['lon'],att['lat_res'],att['lon_res'],rot_im) #row/col idx wrt to center coord
+            # print(upper_row_idx, lower_row_idx, left_col_idx, right_col_idx)
+            background_im = im_display[upper_row_idx:lower_row_idx,left_col_idx:right_col_idx,:]
+            overlay_im = np.where(rot_im == 0, background_im,rot_im)
+            im_display[upper_row_idx:lower_row_idx,left_col_idx:right_col_idx,:] = overlay_im
+
+        nrow, ncol = im_display.shape[0], im_display.shape[1]
+        # resize image by specifying custom width and height
+        resized = cv2.resize(im_display, (ncol//reduction_factor, nrow//reduction_factor))
+        if plot is True:
+            plt.figure(figsize=(15,10))
+            plt.imshow(resized)
+            plt.show()
+        return resized
+    
+def time_delta_correction(df_interpolated,timedelta = 0.1):
+    """ 
+    :param timedelta (float): timedelta in multiples of 0.1 seconds (100 millisecond), can be negative/positive
+    """
+    df = df_interpolated.copy()
+    rows_shift = int(timedelta/0.1)
+    print(f'rows shifted: {rows_shift}')
+    columns_to_shift = ['timestamp','timedelta','latitude','longitude','altitude','flight_angle']
+    df[columns_to_shift] = df[columns_to_shift].shift(rows_shift)
+
+    return df.groupby('image_name').nth(0).reset_index()
