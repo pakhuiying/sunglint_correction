@@ -133,6 +133,13 @@ def get_flight_angle(coords, ref_vec = np.array([0,1])):
     angle_array = np.arccos(np.dot(vec,ref_vec))
     return angle_array/np.pi*180
 
+def get_flight_direction(coords):
+    """ returns dot product wrt to north vector and east vector"""
+    vec = np.diff(coords,axis=0).flatten() #lat, lon
+    vec_north = np.array([1,0])
+    vec_east = np.array([0,1])
+    return np.dot(vec,vec_north),np.dot(vec,vec_east)
+
 def get_flight_angle_fn():
     """
     returns function and params
@@ -295,14 +302,14 @@ class GeotransformImage:
             plt.show()
         return rotatingimage
 
-def interpolate_timestamp(df,milliseconds=100):
+def interpolate_timestamp(df,column_names = ['latitude','longitude','altitude','flight_angle','north_vec','east_vec'], milliseconds=100):
     """
     :param df (pd.DataFrame): column names must include timestamp, latitude, longitude, altitude, flight_angle
+    :param column_names (list of str): list of columns to interpolate
     :param milliseconds (float): timedelta in milliseconds, interpolate between two timestamps at 100ms frequency
     linear interpolation using timedelta
     returns a tuple of (original dataframe, interpolated dataframe)
     """
-    column_names = ['latitude','longitude','altitude','flight_angle']
     if not all([i in df.columns for i in column_names]):
         raise NameError(f'at least one name does not exist: {column_names}')
     
@@ -339,41 +346,74 @@ def interpolate_timestamp(df,milliseconds=100):
     return og_df, interpolated_df
 
 class InterpolateFlight:
-    def __init__(self, df, column_names = ['latitude','longitude','altitude','flight_angle']):
+    def __init__(self, df, interpolate_milliseconds=100, column_names = ['latitude','longitude','altitude','flight_angle','north_vec','east_vec']):
         """ 
         :param df (pd.DataFrame): imported from the folder 'flight_attributes'
+        :param interpolate_milliseconds (int): interpolate timeseries every [x] milliseconds
         :param column_names (list of str): column names in df
         """
         self.df = df
+        self.interpolate_milliseconds = interpolate_milliseconds
         self.column_names = column_names
     
-    def append_flight_angle(self):
+    def append_flight_angle(self,df):
         """calculate flight angle and append to the df"""
-        df = self.df.copy()
-        column_idx = [i for i,c in enumerate(self.df.columns.to_list()) if c in ['latitude','longitude']]
-        angle_coord_list = [np.NaN]
-        for i,rows in tqdm(self.df.iterrows()):
-            if (i == 0) or (i == len(self.df.index)-1):
+        
+        column_idx = [i for i,c in enumerate(df.columns.to_list()) if c in ['latitude','longitude']]
+        angle_coord_list = []
+        for i,rows in tqdm(df.iterrows()):
+            if (i == 0) or (i == len(df.index)-1):
+                angle_coord_list.append(np.NaN)
                 pass
             else:
                 # estimate flight angle from 2 adjacent coordinates
-                flight_att_diff = self.df.iloc[[i-1,i+1],column_idx]
+                flight_att_diff = df.iloc[[i-1,i+1],column_idx]
                 flight_att_diff = flight_att_diff.iloc[:,:2].values
                 flight_angle_coord = get_flight_angle(flight_att_diff)
                 angle_coord_list.append(flight_angle_coord[0])
-        angle_coord_list.append(np.NaN)
+        # angle_coord_list.append(np.NaN)
         df['flight_angle'] = angle_coord_list
         df = df.ffill(axis=0).bfill(axis=0) #fill forward and fill backward
         return df
     
+    def calculate_flight_direction(self, df):
+        """ append north and east vec to df"""
+        
+        column_idx = [i for i,c in enumerate(df.columns.to_list()) if c in ['latitude','longitude']]
+        north_vec_list = []
+        east_vec_list = []
+        for i,rows in tqdm(df.iterrows()):
+            if (i == 0) or (i == len(df.index)-1):
+                north_vec_list.append(np.NaN)
+                east_vec_list.append(np.NaN)
+                pass
+            else:
+                # estimate flight angle from 2 adjacent coordinates
+                flight_att_diff = df.iloc[[i-1,i+1],column_idx]
+                flight_att_diff = flight_att_diff.iloc[:,:2].values
+                flight_dir = get_flight_direction(flight_att_diff)
+                north_vec_list.append(flight_dir[0])
+                east_vec_list.append(flight_dir[1])
+        
+        df['north_vec'] = north_vec_list
+        df['east_vec'] = east_vec_list
+        df = df.ffill(axis=0).bfill(axis=0) #fill forward and fill backward
+        return df
+
     def interpolate_flight(self, plot=True):
         """returns an interpolated df"""
-        flight_attributes_df = self.append_flight_angle()
+        flight_attributes_df = self.append_flight_angle(self.df)
+        flight_attributes_df = self.calculate_flight_direction(flight_attributes_df)
         # convert to datetime format
         flight_attributes_df['timestamp'] = pd.to_datetime(flight_attributes_df['timestamp'])
         # interpolate df
-        df, df_interpolated = interpolate_timestamp(flight_attributes_df)
+        df, df_interpolated = interpolate_timestamp(flight_attributes_df,milliseconds=self.interpolate_milliseconds,
+                                                    column_names = ['latitude','longitude','altitude','flight_angle','north_vec','east_vec'])
+        # df_interpolated = self.append_flight_angle(df_interpolated)
+        # common_columns = set(df_interpolated.columns.to_list()).intersection(set(flight_attributes_df.columns.to_list()))
+        # common_columns = list(sorted(common_columns))
         df_interpolated = df_interpolated.merge(flight_attributes_df,how='outer',on=['timestamp']+self.column_names).ffill(axis=0)
+        # df_interpolated = self.calculate_flight_direction(df_interpolated)
         # assign unique index for image name
         df_interpolated['index'] = df_interpolated['image_name'].str.split('_').str[1].astype(int)
         
@@ -396,7 +436,7 @@ class InterpolateFlight:
 class PlotGeoreference:
     def __init__(self, flight_attributes_df, fp_list, DEM_offset_height = 15):
         """ 
-        :param flight_attributes_df (pd.DataFrame):  dataframe with flight angle
+        :param flight_attributes_df (pd.DataFrame):  dataframe with flight angle, north_vec, east_vec e.g. df_interpolated
         :param fp_list (list of fp): filepath of the thumbnail
         :param geotransform_list (dict): 
             where key is the int index of the image
@@ -425,7 +465,8 @@ class PlotGeoreference:
             flight_att[-2] = flight_att[-2] - self.DEM_offset_height
             flight_angle_coord = rows['flight_angle']
             flight_angle_coord = flight_angle_coord + 90 if flight_angle_coord > 90 else 90 - flight_angle_coord
-
+            if (rows['north_vec'] > 0 and rows['east_vec'] > 0) or (rows['north_vec'] < 0 and rows['east_vec'] < 0):
+                flight_angle_coord = (flight_angle_coord + 180)%360
             GI = GeotransformImage(None,*flight_att,angle=flight_angle_coord)
             lat_res, lon_res = GI.get_degrees_per_pixel()
             lat, lon = rows['latitude'], rows['longitude']
@@ -505,10 +546,12 @@ class PlotGeoreference:
     def plot_georeference(self, reduction_factor = 5, plot = True):
         im_display = self.get_canvas()
         geotransform_list = self.get_flight_attributes()
+        column_idx = [i for i,c in enumerate(self.flight_attributes_df.columns.to_list()) if c in ['latitude','longitude']]
         for i, rows in self.flight_attributes_df.iterrows():
             flight_angle_coord = rows['flight_angle']
             flight_angle_coord = flight_angle_coord + 90 if flight_angle_coord > 90 else 90 - flight_angle_coord
-
+            if (rows['north_vec'] > 0 and rows['east_vec'] > 0) or (rows['north_vec'] < 0 and rows['east_vec'] < 0):
+                flight_angle_coord = (flight_angle_coord + 180)%360
             img_idx = int(os.path.splitext(rows['image_name'])[0].split('_')[1])
             fp = self.fp_list[img_idx]
             # print(rows['image_name'], fp)
@@ -536,14 +579,15 @@ class PlotGeoreference:
             plt.show()
         return resized
     
-def time_delta_correction(df_interpolated,timedelta = 0.1):
+def time_delta_correction(df_interpolated,columns_to_shift = ['timestamp','timedelta','latitude','longitude','altitude','flight_angle','north_vec','east_vec'], timedelta = 0.1):
     """ 
     :param timedelta (float): timedelta in multiples of 0.1 seconds (100 millisecond), can be negative/positive
+    :param columns_to_shift (list of str): columns to time shift
     """
     df = df_interpolated.copy()
     rows_shift = int(timedelta/0.1)
     print(f'rows shifted: {rows_shift}')
-    columns_to_shift = ['timestamp','timedelta','latitude','longitude','altitude','flight_angle']
+    
     df[columns_to_shift] = df[columns_to_shift].shift(rows_shift)
 
     return df.groupby('image_name').nth(0).reset_index()
