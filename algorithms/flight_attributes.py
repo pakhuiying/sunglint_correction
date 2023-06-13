@@ -475,7 +475,7 @@ class PlotGeoreference:
                                     'flight_angle': flight_angle_coord, 'image_fp':self.fp_list[img_idx]}
         return geotransform_list
 
-    def get_canvas(self):
+    def get_canvas(self,scale_factor=1.05):
         geotransform_list = self.get_flight_attributes()
         idx = 0
         lat_max = [idx,0]
@@ -517,8 +517,8 @@ class PlotGeoreference:
         self.left_lon = left_lon
         self.right_lon = right_lon
 
-        nrow = ceil((upper_lat - lower_lat)/pixel_res)
-        ncol = ceil((right_lon - left_lon)/pixel_res)
+        nrow = ceil(scale_factor*(upper_lat - lower_lat)/pixel_res)
+        ncol = ceil(scale_factor*(right_lon - left_lon)/pixel_res)
         im_display = np.zeros((nrow,ncol,3),dtype=np.uint8) #includes alpha channel
         print(f'shape of canvas{im_display.shape}')
         return im_display
@@ -567,6 +567,7 @@ class PlotGeoreference:
             upper_row_idx, lower_row_idx, left_col_idx, right_col_idx = self.get_row_col_index(att['lat'],att['lon'],att['lat_res'],att['lon_res'],rot_im) #row/col idx wrt to center coord
             # print(upper_row_idx, lower_row_idx, left_col_idx, right_col_idx)
             background_im = im_display[upper_row_idx:lower_row_idx,left_col_idx:right_col_idx,:]
+            assert rot_im.shape == background_im.shape, f'shapes are diff {rot_im.shape} {background_im.shape}'
             overlay_im = np.where(rot_im == 0, background_im,rot_im)
             im_display[upper_row_idx:lower_row_idx,left_col_idx:right_col_idx,:] = overlay_im
 
