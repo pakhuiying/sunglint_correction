@@ -434,10 +434,11 @@ class InterpolateFlight:
         return df_interpolated
     
 class PlotGeoreference:
-    def __init__(self, flight_attributes_df, fp_list, DEM_offset_height = 15):
+    def __init__(self, flight_attributes_df, fp_list, wql_dict = None,DEM_offset_height = 15):
         """ 
         :param flight_attributes_df (pd.DataFrame):  dataframe with flight angle, north_vec, east_vec e.g. df_interpolated
         :param fp_list (list of fp): filepath of the thumbnail
+        :param wql_dict (dict): where keys are: lat, lon, measurements
         :param geotransform_list (dict): 
             where key is the int index of the image
             where each value is a dict of keys:'lat','lon','lat_res','lon_res'
@@ -447,6 +448,7 @@ class PlotGeoreference:
         returns an np.ndarray
         """
         self.flight_attributes_df = flight_attributes_df
+        self.wql_dict = wql_dict
         # where keys are image index extracted from the image_name from fp_list
         self.fp_list = {int(os.path.splitext(os.path.split(fp)[-1])[0].split('_')[1]):fp for fp in fp_list}
         self.DEM_offset_height = DEM_offset_height
@@ -542,8 +544,48 @@ class PlotGeoreference:
         right_col_idx = left_col_idx + ncol
         return upper_row_idx, lower_row_idx, left_col_idx, right_col_idx
 
-    
-    def plot_georeference(self, reduction_factor = 5, plot = True):
+    def plot_wql(self, axis = None,**kwargs):
+        if self.wql_dict is None:
+            return None
+        else:
+            if axis is None:
+                im_display = self.get_canvas()
+            tss_lat = self.wql_dict['lat']
+            tss_lon = self.wql_dict['lon']
+            tss_measurements = self.wql_dict['measurements']
+            rows_idx = []
+            cols_idx = []
+            tss_idx = []
+            for i in range(len(tss_lat)):
+                lat = tss_lat[i]
+                lon = tss_lon[i]
+                if lat > self.upper_lat or lat < self.lower_lat:
+                    continue
+                if lon > self.right_lon or lon < self.left_lon:
+                    continue
+                row_idx = int((self.upper_lat - lat)/self.pixel_res)
+                col_idx = int((lon - self.left_lon)/self.pixel_res)
+                rows_idx.append(row_idx)
+                cols_idx.append(col_idx)
+                tss_idx.append(tss_measurements[i])
+
+            if axis is None:
+                fig,axis = plt.subplots(figsize=(7,10))
+                if im_display.dtype == 'uint8':
+                    im_display[im_display == 0] = 255
+                else:
+                    im_display[im_display == 0] = 1.0
+                axis.imshow(im_display)
+            im = axis.scatter(cols_idx,rows_idx,c=tss_idx,alpha=0.5,label='in-situ sampling',**kwargs)
+            axis.legend(loc='lower center',bbox_to_anchor=(0.5,-0.2),prop={'size': 16})
+            axcb = plt.colorbar(im,ax=axis)
+            axcb.set_label('Turbidity (NTU)')
+            if axis is None:
+                plt.show()
+
+            return
+
+    def plot_georeference(self, reduction_factor = 5, plot = True, add_wql=False,**kwargs):
         im_display = self.get_canvas()
         geotransform_list = self.get_flight_attributes()
         column_idx = [i for i,c in enumerate(self.flight_attributes_df.columns.to_list()) if c in ['latitude','longitude']]
@@ -575,9 +617,20 @@ class PlotGeoreference:
         # resize image by specifying custom width and height
         resized = cv2.resize(im_display, (ncol//reduction_factor, nrow//reduction_factor))
         if plot is True:
-            plt.figure(figsize=(15,10))
-            plt.imshow(resized)
-            plt.show()
+            fig, axis = plt.subplots(figsize=(15,10))
+            if add_wql is False:
+                axis.imshow(resized)
+                plt.show()
+            else:
+                if self.wql_dict is not None:
+                    if im_display.dtype == 'uint8':
+                        im_display[im_display == 0] = 255
+                    else:
+                        im_display[im_display == 0] = 1.0
+                    axis.imshow(im_display)
+                    self.plot_wql(axis = axis,**kwargs)
+                    axis.axis('off')
+            
         return resized
     
 def time_delta_correction(df_interpolated,columns_to_shift = ['timestamp','timedelta','latitude','longitude','altitude','flight_angle','north_vec','east_vec'], timedelta = 0.1):
