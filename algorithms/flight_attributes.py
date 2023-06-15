@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 import pickle
 import numpy as np
 import pandas as pd
@@ -11,6 +12,8 @@ from scipy.interpolate import griddata
 from tqdm import tqdm
 from PIL import Image
 from math import ceil
+from scipy.optimize import curve_fit
+
 class FlightAttributes:
     def __init__(self,df):
         """ 
@@ -455,7 +458,8 @@ class PlotGeoreference:
 
     def get_flight_attributes(self):
         """ 
-        returns a dict, where keys are image_index that corresponds to image_name
+        returns a dict, where keys are image_index that corresponds to image_name,
+            values are lat, lon, lat_res, lon_res, flight_angle, image_fp
         """
         column_idx = [i for i,c in enumerate(self.flight_attributes_df.columns.to_list()) if c in ['latitude','longitude','altitude','flight_angle']]
 
@@ -645,3 +649,132 @@ def time_delta_correction(df_interpolated,columns_to_shift = ['timestamp','timed
     df[columns_to_shift] = df[columns_to_shift].shift(rows_shift)
 
     return df.groupby('image_name').nth(0).reset_index()
+
+class ExtractInsituSpectral:
+    def __init__(self, flight_attributes_df, fp_list, wql_dict = None,DEM_offset_height = 15, radius = 1):
+        """ 
+        :param flight_attributes_df (pd.DataFrame):  dataframe with flight angle, north_vec, east_vec e.g. df_interpolated
+        :param fp_list (list of fp): filepath of the thumbnail
+        :param wql_dict (dict): where keys are: lat, lon, measurements
+        :param geotransform_list (dict): 
+            where key is the int index of the image
+            where each value is a dict of keys:'lat','lon','lat_res','lon_res'
+        :param im_list (dict): 
+            where key is the int index of the image
+            where each value is an image
+        returns an np.ndarray
+        """
+        self.flight_attributes_df = flight_attributes_df
+        self.wql_dict = wql_dict
+        # where keys are image index extracted from the image_name from fp_list
+        self.fp_list = {int(os.path.splitext(os.path.split(fp)[-1])[0].split('_')[1]):fp for fp in fp_list}
+        self.DEM_offset_height = DEM_offset_height
+        PG = PlotGeoreference(flight_attributes_df, fp_list,wql_dict,DEM_offset_height)
+        self.geotransform_list = PG.get_flight_attributes()
+        self.radius = int(radius*10)
+    
+    def get_row_col_index(self, row_idx, col_idx, nrow, ncol):
+        pad = self.radius
+        upper_row_idx = row_idx - pad
+        lower_row_idx = row_idx + pad
+        left_col_idx = col_idx - pad
+        right_col_idx = col_idx + pad
+        
+        upper_row_idx = 0 if upper_row_idx < 0 else upper_row_idx
+        lower_row_idx = nrow if lower_row_idx > nrow else lower_row_idx
+        left_col_idx = 0 if left_col_idx < 0 else left_col_idx
+        right_col_idx = ncol if right_col_idx > ncol else right_col_idx
+
+        return upper_row_idx, lower_row_idx, left_col_idx, right_col_idx
+    
+    def check_within_bounding_box(self, att, rot_im):
+        """ 
+        :param att (dictionary): with keys: lat, lon, lat_res, lon_res
+        """
+        nrow, ncol = rot_im.shape[0], rot_im.shape[1]
+        
+        upper_lat = att['lat'] + ceil(nrow/2)*att['lat_res']
+        lower_lat = att['lat'] - ceil(nrow/2)*att['lat_res']
+        left_lon = att['lon'] - ceil(ncol/2)*att['lon_res']
+        right_lon = att['lon'] + ceil(ncol/2)*att['lon_res']
+
+        # print(upper_lat,lower_lat,left_lon,right_lon)
+        tss_lat = self.wql_dict['lat']
+        tss_lon = self.wql_dict['lon']
+        tss_measurements = self.wql_dict['measurements']
+
+        rows_idx = []
+        cols_idx = []
+        # tss_idx = []
+        # extracted_spectral_list = []
+        TSS_df_dict = dict()
+        for i in range(len(tss_lat)):
+            lat = tss_lat[i]
+            lon = tss_lon[i]
+            
+            if lat > upper_lat or lat < lower_lat:
+                continue
+            if lon > right_lon or lon < left_lon:
+                continue
+
+            row_idx = int((upper_lat - lat)/att['lat_res'])
+            col_idx = int((lon - left_lon)/att['lon_res'])
+            # print(f'row_idx: {row_idx}, col_idx: {col_idx}')
+            upper_row_idx, lower_row_idx, left_col_idx, right_col_idx = self.get_row_col_index(row_idx, col_idx, nrow, ncol)
+            ROI = rot_im[upper_row_idx:lower_row_idx,left_col_idx:right_col_idx,:]
+            ROI_list = [ROI[:,:,i] for i in range(ROI.shape[2])]
+            band_reflectance = [np.mean(i[i!=0]) for i in ROI_list] #remove 0s, then calculate the mean of the ROI for each layer
+            TSS_df_dict[i] = [i, tss_measurements[i], lat, lon] + band_reflectance
+            # extracted_spectral_list.append(extracted_spectral_mean)
+            rows_idx.append(row_idx)
+            cols_idx.append(col_idx)
+            # tss_idx.append(tss_measurements[i])
+        df_columns = ['observation_number','tss_conc','tss_lat','tss_lon'] + ['band_{}'.format(i) for i in range(rot_im.shape[2])]
+        tss_df = pd.DataFrame.from_dict(TSS_df_dict,orient='index',columns=df_columns)
+
+        return rows_idx, cols_idx, tss_df#rows_idx, cols_idx, tss_idx, extracted_spectral_list
+
+    def get_reflectance_from_GPS(self, reflectance_fp, plot = True):
+        """ 
+        :param reflectance_fp (str): filepath of stacked reflectance image
+        :param radius (int): take the average reflectance over a square radius of radius*10
+        """
+        img_idx = os.path.basename(reflectance_fp)
+        img_idx = int(os.path.splitext(img_idx)[0].split('_')[1])
+        
+        assert img_idx in list(self.fp_list), 'reflectance_fp must correspond to fp_list variable'
+
+        if reflectance_fp.endswith('.ob'):
+            reflectance = mutils.load_pickle(reflectance_fp)
+        else:
+            reflectance = None
+        
+        assert reflectance is not None, 'reflectance image cannot be opened!'
+        GI = GeotransformImage(reflectance,None,None,None,None,angle=self.geotransform_list[img_idx]['flight_angle'])
+        rot_im = GI.affine_transformation(plot=False)
+        rot_im = np.fliplr(np.flipud(rot_im))
+        att = self.geotransform_list[img_idx]
+
+        rows_idx, cols_idx, tss_df = self.check_within_bounding_box(att, rot_im)
+        # rows_idx, cols_idx, tss_idx, extracted_spectral_list = self.check_within_bounding_box(att, rot_im)
+        if plot is True:
+            rgb_indices = [2,1,0]
+            plt.figure(figsize=(10,10))
+            plt.imshow(np.take(rot_im,rgb_indices,axis=2))
+            plt.scatter(cols_idx,rows_idx,c=tss_df['tss_conc'],alpha=0.5,label='in-situ sampling')
+            plt.axis('off')
+            plt.show()
+        
+        return tss_df
+    
+    def extract_spectral(self,save_fp=None):
+        df_list = []
+        for img_idx, fp in self.fp_list.items():
+            tss_df = self.get_reflectance_from_GPS(fp, plot = False)
+            tss_df.insert(1,'image_index',img_idx)#['image_index'] = img_idx
+            df_list.append(tss_df)
+        df = pd.concat(df_list)
+        df.dropna(how='any',inplace=True)
+        if save_fp is not None:
+            df.to_csv(save_fp,index=False)
+        return df
