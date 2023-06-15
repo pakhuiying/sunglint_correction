@@ -81,7 +81,7 @@ def parallel_process(function, iterable, parameters, progress_callback=None, use
                 progress_callback(float(i) / futures_len)
 
 
-def save_capture(params, cap):
+def save_capture(params, cap, normalise=False):
     """
     Process an ImageSet according to program parameters. Saves rgb
     :param params: dict of program parameters from ImageSet.process_imageset()
@@ -101,14 +101,17 @@ def save_capture(params, cap):
             return
 
         if params['output_stack_dir']:
-            fn =  os.path.split(cap.images[0].path)[-1]
+            fn =  os.path.splitext(os.path.split(cap.images[0].path)[-1])[0]
             output_stack_file_path = os.path.join(params['output_stack_dir'], fn + '.tif')
             if params['overwrite'] or not os.path.exists(output_stack_file_path):
                 cap.save_capture_as_stack(output_stack_file_path)
         if params['output_rgb_dir']:
             output_rgb_file_path = os.path.join(params['output_rgb_dir'], fn + '.jpg')
             if params['overwrite'] or not os.path.exists(output_rgb_file_path):
-                cap.save_capture_as_rgb(output_rgb_file_path)
+                if normalise is True:
+                    cap.save_capture_as_rgb(output_rgb_file_path)
+                else:
+                    cap.save_capture_as_rgb_raw(output_rgb_file_path)
 
         cap.clear_image_data()
     except Exception as e:
@@ -235,7 +238,8 @@ class ImageSet(object):
                          multiprocess=True,
                          overwrite=False,
                          progress_callback=None,
-                         use_tqdm=False):
+                         use_tqdm=False,
+                         normalise=False):
         """
         Write band stacks and rgb thumbnails to disk.
         :param warp_matrices: 2d List of warp matrices derived from Capture.get_warp_matrices()
@@ -247,6 +251,7 @@ class ImageSet(object):
         :param overwrite: boolean True to overwrite existing files
         :param progress_callback: function to report progress to
         :param use_tqdm: boolean True to use tqdm progress bar
+        :param normalise: boolean False to not normalise images in save_captures_as_rgb
         """
 
         if progress_callback is not None:
@@ -276,8 +281,9 @@ class ImageSet(object):
 
         data, columns = self.as_nested_lists()
         df = pd.DataFrame.from_records(data, index='timestamp', columns=columns)
-        if os.path.exists(os.path.join(os.path.dirname(output_rgb_directory),'flight_attributes')) is False:
-            output_flight_att_directory = os.path.join(os.path.dirname(output_rgb_directory),'flight_attributes')
+
+        output_flight_att_directory = os.path.join(os.path.dirname(output_rgb_directory),'flight_attributes')
+        if os.path.exists(output_flight_att_directory) is False:
             os.mkdir(output_flight_att_directory)
         df.to_csv(os.path.join(output_flight_att_directory,'flight_attributes.csv'))
 
@@ -298,10 +304,10 @@ class ImageSet(object):
                     'leave': True
                 }
                 for cap in tqdm(iterable=self.captures, desc='Processing ImageSet', **kwargs):
-                    save_capture(params, cap)
+                    save_capture(params, cap, normalise=normalise)
             else:
                 for i, cap in enumerate(self.captures):
-                    save_capture(params, cap)
+                    save_capture(params, cap, normalise=normalise)
                     if progress_callback is not None:
                         progress_callback(float(i) / float(len(self.captures)))
 

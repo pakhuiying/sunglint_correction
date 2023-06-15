@@ -552,6 +552,15 @@ class Capture(object):
         finally:
             out_raster = None
 
+    def save_capture_as_rgb_raw(self, out_file_name, rgb_band_indices=(2, 1, 0)):
+        """ same as save_capture_as_rgb but dont normalise images"""
+        if self.__aligned_capture is None:
+            raise RuntimeError("Call Capture.create_aligned_capture() prior to saving as RGB.")
+        
+        rgb = np.take(self.__aligned_capture,rgb_band_indices,axis=2)
+        
+        imageio.imwrite(out_file_name, (255 * rgb).astype('uint8'))
+
     def save_capture_as_rgb(self, out_file_name, gamma=1.4, downsample=1, white_balance='norm', hist_min_percent=0.5,
                             hist_max_percent=99.5, sharpen=True, rgb_band_indices=(2, 1, 0)):
         """
