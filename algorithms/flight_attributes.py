@@ -455,7 +455,7 @@ class PlotGeoreference:
         # where keys are image index extracted from the image_name from fp_list
         self.fp_list = {int(os.path.splitext(os.path.split(fp)[-1])[0].split('_')[1]):fp for fp in fp_list}
         self.DEM_offset_height = DEM_offset_height
-
+        self.rgb_bands = [2,1,0]
     def get_flight_attributes(self):
         """ 
         returns a dict, where keys are image_index that corresponds to image_name,
@@ -508,7 +508,11 @@ class PlotGeoreference:
         im_list = dict()
         for im_type, coord_type in zip(['upper_lat','lower_lat','left_lon','right_lon'],[lat_max,lat_min,lon_min,lon_max]):
             fp = self.fp_list[coord_type[0]]
-            im = np.asarray(Image.open(fp))
+            if fp.endswith('.tif'):
+                im = np.asarray(Image.open(fp))
+            elif fp.endswith('.ob'):
+                im = mutils.load_pickle(fp)
+                im = np.take(im,self.rgb_bands,axis=2)
             GI = GeotransformImage(im,None,None,None,None,angle=geotransform_list[coord_type[0]]['flight_angle'])
             rot_im = GI.affine_transformation(plot=False)
             im_list[im_type] = rot_im
@@ -525,10 +529,10 @@ class PlotGeoreference:
 
         nrow = ceil(scale_factor*(upper_lat - lower_lat)/pixel_res)
         ncol = ceil(scale_factor*(right_lon - left_lon)/pixel_res)
-        if self.fp_list[0].endswith('tif'):
+        if fp.endswith('tif'):
             im_display = np.zeros((nrow,ncol,3),dtype=np.uint8) #includes alpha channel
-        elif self.fp_list[0].endswith('.ob'):
-            im_display = np.zeros((nrow,ncol,3))
+        elif fp.endswith('.ob'):
+            im_display = np.zeros((nrow,ncol,3), dtype=np.float64)
         print(f'shape of canvas{im_display.shape}')
         return im_display
     
@@ -613,6 +617,7 @@ class PlotGeoreference:
                 im = np.asarray(Image.open(fp)) if (os.path.splitext(rows['image_name'])[0] in fp) else None
             elif fp.endswith('.ob'):
                 im = mutils.load_pickle(fp)
+                im = np.take(im,self.rgb_bands,axis=2)
             if im is None:
                 raise NameError("image is None because filepath does not match image name")
             GI = GeotransformImage(im,None,None,None,None,angle=flight_angle_coord)
@@ -630,27 +635,31 @@ class PlotGeoreference:
 
         nrow, ncol = im_display.shape[0], im_display.shape[1]
         # resize image by specifying custom width and height
-        resized = cv2.resize(im_display, (ncol//reduction_factor, nrow//reduction_factor))
+        
         if plot is True:
+            if im_display.dtype == 'uint8':
+                im_display[im_display == 0] = 255
+            else:
+                im_display[im_display == 0] = 1.0
+
+            resized = cv2.resize(im_display, (ncol//reduction_factor, nrow//reduction_factor))
+
             if axis is None:
                 fig, axis = plt.subplots(figsize=(15,10))
+
             if add_wql is False:
                 axis.imshow(resized)
-                
             else:
                 if self.wql_dict is not None:
-                    if im_display.dtype == 'uint8':
-                        im_display[im_display == 0] = 255
-                    else:
-                        im_display[im_display == 0] = 1.0
-                    
                     axis.imshow(im_display)
                     self.plot_wql(axis = axis,**kwargs)
                     axis.axis('off')
 
             if axis is None:
                 plt.show()
-        return resized
+            return resized
+        else:
+            return im_display
     
 def time_delta_correction(df_interpolated,columns_to_shift = ['timestamp','timedelta','latitude','longitude','altitude','flight_angle','north_vec','east_vec'], timedelta = 0.1):
     """ 
@@ -793,3 +802,66 @@ class ExtractInsituSpectral:
         if save_fp is not None:
             df.to_csv(save_fp,index=False)
         return df
+
+class CompareInsituSpectral:
+    def __init__(self,image_indices, dir_list,df_interpolated,wql_dict,titles,timedelta=-1.5,DEM_offset_height=15):
+        """ 
+        :param image_indices (list of int): where each element in the list represents the image index that is in image name (IMG_0123)
+        :param dir_list (list of str): full filepath of the directories where reflectance/corrected reflectance is saved
+        :param df_interpolated (pd DataFrame): the interpolated df from InterpolateFlight.interpolate_flight()
+        :param wql_dict (dict): dictionary of wql details where keys are lat, lon, measurements
+        :param titles (list of str): titles for each subplot that corresponds to the algorithm
+        :param timedelta (float): time shift for time delay correction for image alignment
+        :param DEM_offset_height (float): offset height to measure altitude
+        """
+        assert len(titles) == len(dir_list), 'length of title must == length of directories'
+        self.image_indices = image_indices
+        self.dir_list = dir_list
+        self.df_interpolated = df_interpolated
+        self.wql_dict = wql_dict
+        self.titles = titles
+        self.timedelta = timedelta
+        self.DEM_offset_height = DEM_offset_height
+        df_cropped = time_delta_correction(self.df_interpolated, timedelta=self.timedelta)
+        self.df_cropped = df_cropped.iloc[image_indices,:]
+    
+    def extract_spectral(self, save_dir = None):
+        """
+        :param save_dir (directory) to save extracted spectral_information
+        """
+        if (save_dir is not None) and (os.path.exists(os.path.join(save_dir,"Extracted_Spectral_Information")) is False):
+            extracted_spectral_dir = os.path.join(save_dir,"Extracted_Spectral_Information")
+            os.mkdir(extracted_spectral_dir)
+        else:
+            extracted_spectral_dir = None
+            df_list = []
+        for i, (reflectance_directory,fn) in enumerate(zip(self.dir_list, self.titles)):
+            img_list = [os.path.join(reflectance_directory,f'IMG_{str(i).zfill(4)}_1.ob') for i in self.image_indices]
+            EIS = ExtractInsituSpectral(self.df_cropped, img_list, self.wql_dict ,DEM_offset_height = self.DEM_offset_height)
+            if extracted_spectral_dir is not None:
+                _ = EIS.extract_spectral(os.path.join(extracted_spectral_dir,f'{i+1}_{fn}.csv'))
+            else:
+                df = EIS.extract_spectral()
+                df_list.append(df)
+        
+        if extracted_spectral_dir is None:
+            return df_list
+        else:
+            print(f'extracted spectral data saved in {extracted_spectral_dir}')
+            return None
+
+    def compare_rgb(self):
+        
+        fig, axes = plt.subplots(1,len(self.dir_list),figsize=(10,10))
+        
+        for d,dir in enumerate(self.dir_list):
+            img_list = [os.path.join(dir,f'IMG_{str(i).zfill(4)}_1.ob') for i in self.image_indices]
+            PG = PlotGeoreference(self.df_cropped,img_list,None,
+                                                DEM_offset_height=self.DEM_offset_height)
+            _ = PG.plot_georeference(reduction_factor = 5, plot = True, add_wql=False, axis=axes[d])
+
+        for i,ax in enumerate(axes.flatten()):
+            ax.axis('off')
+            ax.set_title(self.titles[i])
+        plt.show()
+        return
