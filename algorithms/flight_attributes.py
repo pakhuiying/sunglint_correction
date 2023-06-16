@@ -525,7 +525,10 @@ class PlotGeoreference:
 
         nrow = ceil(scale_factor*(upper_lat - lower_lat)/pixel_res)
         ncol = ceil(scale_factor*(right_lon - left_lon)/pixel_res)
-        im_display = np.zeros((nrow,ncol,3),dtype=np.uint8) #includes alpha channel
+        if self.fp_list[0].endswith('tif'):
+            im_display = np.zeros((nrow,ncol,3),dtype=np.uint8) #includes alpha channel
+        elif self.fp_list[0].endswith('.ob'):
+            im_display = np.zeros((nrow,ncol,3))
         print(f'shape of canvas{im_display.shape}')
         return im_display
     
@@ -589,7 +592,12 @@ class PlotGeoreference:
 
             return
 
-    def plot_georeference(self, reduction_factor = 5, plot = True, add_wql=False,**kwargs):
+    def plot_georeference(self, reduction_factor = 5, plot = True, add_wql=False,axis=None,**kwargs):
+        """
+        :param reduction_factor (int): factor to reduce image by to speed up display of pic
+        :param add_wql (bool): whether or not to add wql points
+        :param axis (Axes class): plot on a supplied axis instead, if None, create a new fig
+        """
         im_display = self.get_canvas()
         geotransform_list = self.get_flight_attributes()
         column_idx = [i for i,c in enumerate(self.flight_attributes_df.columns.to_list()) if c in ['latitude','longitude']]
@@ -601,7 +609,10 @@ class PlotGeoreference:
             img_idx = int(os.path.splitext(rows['image_name'])[0].split('_')[1])
             fp = self.fp_list[img_idx]
             # print(rows['image_name'], fp)
-            im = np.asarray(Image.open(fp)) if (os.path.splitext(rows['image_name'])[0] in fp) else None
+            if fp.endswith('.tif'):
+                im = np.asarray(Image.open(fp)) if (os.path.splitext(rows['image_name'])[0] in fp) else None
+            elif fp.endswith('.ob'):
+                im = mutils.load_pickle(fp)
             if im is None:
                 raise NameError("image is None because filepath does not match image name")
             GI = GeotransformImage(im,None,None,None,None,angle=flight_angle_coord)
@@ -621,20 +632,24 @@ class PlotGeoreference:
         # resize image by specifying custom width and height
         resized = cv2.resize(im_display, (ncol//reduction_factor, nrow//reduction_factor))
         if plot is True:
-            fig, axis = plt.subplots(figsize=(15,10))
+            if axis is None:
+                fig, axis = plt.subplots(figsize=(15,10))
             if add_wql is False:
                 axis.imshow(resized)
-                plt.show()
+                
             else:
                 if self.wql_dict is not None:
                     if im_display.dtype == 'uint8':
                         im_display[im_display == 0] = 255
                     else:
                         im_display[im_display == 0] = 1.0
+                    
                     axis.imshow(im_display)
                     self.plot_wql(axis = axis,**kwargs)
                     axis.axis('off')
-            
+
+            if axis is None:
+                plt.show()
         return resized
     
 def time_delta_correction(df_interpolated,columns_to_shift = ['timestamp','timedelta','latitude','longitude','altitude','flight_angle','north_vec','east_vec'], timedelta = 0.1):
